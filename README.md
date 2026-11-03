@@ -13,7 +13,7 @@ Requirements: Go (version in `go.mod`), Docker.
 
 ```sh
 cp .env.example .env    # dev-only defaults; change POSTGRES_PORT if 5432 is taken
-make up                 # start Postgres
+make up                 # start Postgres and the Evidence Vault (RustFS)
 make migrate            # apply migrations as the owner role
 make serve              # run the API on :8080
 ```
@@ -52,7 +52,7 @@ Both are created by [`deploy/postgres/init-roles.sh`](deploy/postgres/init-roles
 
 ```sh
 make test               # unit tests
-make test-integration   # + integration tests against real Postgres (needs Docker)
+make test-integration   # + integration tests against real Postgres and RustFS (needs Docker)
 make lint
 make sqlc               # regenerate query code after editing migrations/ or internal/db/queries/
 ```

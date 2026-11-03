@@ -17,5 +17,38 @@ services:
       timeout: 3s
       retries: 30
 
+  # Evidence Vault: S3-compatible object storage (ADR-0001, ADR-0002).
+  # Keep the image in sync with internal/testenv/vault.go.
+  vault:
+    image: rustfs/rustfs:1.0.4
+    environment:
+      RUSTFS_ACCESS_KEY: ${VAULT_ACCESS_KEY:?set in .env}
+      RUSTFS_SECRET_KEY: ${VAULT_SECRET_KEY:?set in .env}
+    ports:
+      - "${VAULT_PORT:-9000}:9000"
+    volumes:
+      - vaultdata:/data
+
+  # One-shot: creates the private bucket if it does not exist yet.
+  vault-init:
+    image: amazon/aws-cli:latest
+    depends_on:
+      - vault
+    environment:
+      AWS_ACCESS_KEY_ID: ${VAULT_ACCESS_KEY:?set in .env}
+      AWS_SECRET_ACCESS_KEY: ${VAULT_SECRET_KEY:?set in .env}
+      AWS_DEFAULT_REGION: us-east-1
+      BUCKET: ${VAULT_BUCKET:-evidence}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for i in $$(seq 1 30); do
+          aws --endpoint-url http://vault:9000 s3api head-bucket --bucket "$$BUCKET" 2>/dev/null && echo "bucket $$BUCKET exists" && exit 0
+          aws --endpoint-url http://vault:9000 s3api create-bucket --bucket "$$BUCKET" && echo "bucket $$BUCKET created" && exit 0
+          sleep 1
+        done
+        echo "vault not reachable" >&2; exit 1
+
 volumes:
   pgdata:
+  vaultdata:

@@ -212,7 +212,7 @@ Notifications contain identifiers and the transition only, never document conten
 - **Lock order.** Transactions lock the Entity row first, then any Document rows, everywhere ([`internal/app/transition.go`](internal/app/transition.go)).
 - **Stale decisions.** A decision must state the `expected_version` the officer reviewed. Two simultaneous approvals give one success and one 409 ([`TestReview`](internal/httpapi/review_integration_test.go)).
 - **No lock held during the provider call.** The screening provider is called outside any transaction, under a timeout. If the Entity changed meanwhile, the answer is discarded ([`TestScreeningDiscardsAnswerIfEntityChangedMeanwhile`](internal/httpapi/checks_integration_test.go)). A **Provider Error** records nothing and returns a retryable 502.
-- **Idempotency keys.** `POST /entities` and `POST /entities/{id}/checks` accept an `Idempotency-Key`. Concurrent duplicates do the work once, so there's no second Entity and no second paid provider call ([`TestIdempotentChecks`](internal/httpapi/idempotency_integration_test.go)).
+- **Idempotency keys.** `POST /entities` and `POST /entities/{id}/checks` accept an `Idempotency-Key`. Concurrent duplicates do the work once, so there's no second Entity and no second paid provider call ([`TestIdempotentChecks`](internal/httpapi/idempotency_integration_test.go)). Keys are kept for 24 hours (`IDEMPOTENCY_KEY_RETENTION`), then deleted by the sweeper ([`TestIdempotencyKeyRetention`](internal/httpapi/idempotency_retention_integration_test.go)).
 
 ### Observability
 
@@ -235,7 +235,7 @@ Notifications contain identifiers and the transition only, never document conten
 - **S3 events.** Use object-created events to complete uploads automatically instead of relying on the client's `/complete` call, and quarantine and malware-scan uploads before they count.
 - **A message broker.** Relay the outbox to a broker such as Kafka or SNS/SQS rather than to webhooks directly, with per-entity partitioning if consumers need ordering.
 - **Ongoing monitoring.** Re-screen when sanctions and PEP lists change, add adverse-media screening, and make periodic reviews risk-based.
-- **Retention and deletion.** Keep evidence, audit trails and access logs as long as regulation requires. After that, delete them (including vault objects and expired uploads), and remove old idempotency keys.
+- **Retention and deletion.** Keep evidence, audit trails and access logs as long as regulation requires. After that, delete them (including vault objects and expired uploads). Idempotency keys already have a retention window here; the rest of the data would get one too.
 - **Break-glass access.** Allow time-boxed, approved emergency access to evidence or data, recorded and alerted on, in place of standing superuser access.
 - **Real authentication.** Use OIDC with roles from the identity provider and service-to-service authentication for the system actor.
 
@@ -253,7 +253,7 @@ internal/vault        Evidence Vault client (presigned upload/download, verifica
 internal/screening    Screening Provider interface and the deterministic mock
 internal/outbox       notification worker, log and webhook publishers
 internal/webhook      Standard Webhooks signing and verification
-internal/expiry       sweeper for abandoned Upload Intents
+internal/expiry       sweeper: expires abandoned Upload Intents, deletes old idempotency keys
 internal/metrics      Prometheus collectors
 migrations/           goose SQL migrations, embedded in the binary
 ```

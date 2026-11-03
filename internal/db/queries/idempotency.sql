@@ -25,3 +25,8 @@ WHERE user_id = $1 AND key = $2 AND completed_at IS NULL;
 -- Forgets an unfinished claim, so the same key can be retried.
 DELETE FROM idempotency_keys
 WHERE user_id = $1 AND key = $2 AND completed_at IS NULL;
+
+-- name: DeleteIdempotencyKeysOlderThan :execrows
+-- Retention: forgets keys first used longer ago than the window.
+DELETE FROM idempotency_keys
+WHERE started_at < now() - make_interval(secs => sqlc.arg(retention_seconds)::float8);

@@ -56,6 +56,20 @@ func (q *Queries) CompleteIdempotencyKey(ctx context.Context, arg CompleteIdempo
 	return err
 }
 
+const deleteIdempotencyKeysOlderThan = `-- name: DeleteIdempotencyKeysOlderThan :execrows
+DELETE FROM idempotency_keys
+WHERE started_at < now() - make_interval(secs => $1::float8)
+`
+
+// Retention: forgets keys first used longer ago than the window.
+func (q *Queries) DeleteIdempotencyKeysOlderThan(ctx context.Context, retentionSeconds float64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteIdempotencyKeysOlderThan, retentionSeconds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getIdempotencyKey = `-- name: GetIdempotencyKey :one
 SELECT user_id, key, fingerprint, started_at, response_status, response_body, completed_at FROM idempotency_keys
 WHERE user_id = $1 AND key = $2

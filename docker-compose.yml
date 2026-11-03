@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      KYC_OWNER_PASSWORD: ${KYC_OWNER_PASSWORD:?set in .env}
+      KYC_APP_PASSWORD: ${KYC_APP_PASSWORD:?set in .env}
+      KYC_DB_NAME: kyc
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./deploy/postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d kyc"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:

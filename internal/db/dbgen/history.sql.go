@@ -7,6 +7,7 @@ package dbgen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -33,10 +34,9 @@ func (q *Queries) InsertOutbox(ctx context.Context, arg InsertOutboxParams) erro
 	return err
 }
 
-const insertStatusHistory = `-- name: InsertStatusHistory :one
+const insertStatusHistory = `-- name: InsertStatusHistory :exec
 INSERT INTO status_history (entity_id, from_status, to_status, entity_version, reason, changed_by)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, entity_id, from_status, to_status, entity_version, reason, changed_by, changed_at
 `
 
 type InsertStatusHistoryParams struct {
@@ -48,8 +48,10 @@ type InsertStatusHistoryParams struct {
 	ChangedBy     uuid.UUID
 }
 
-func (q *Queries) InsertStatusHistory(ctx context.Context, arg InsertStatusHistoryParams) (StatusHistory, error) {
-	row := q.db.QueryRow(ctx, insertStatusHistory,
+// No RETURNING: under RLS, returning rows requires the SELECT policy, and
+// some writers (support agents) may append history but not read it.
+func (q *Queries) InsertStatusHistory(ctx context.Context, arg InsertStatusHistoryParams) error {
+	_, err := q.db.Exec(ctx, insertStatusHistory,
 		arg.EntityID,
 		arg.FromStatus,
 		arg.ToStatus,
@@ -57,18 +59,7 @@ func (q *Queries) InsertStatusHistory(ctx context.Context, arg InsertStatusHisto
 		arg.Reason,
 		arg.ChangedBy,
 	)
-	var i StatusHistory
-	err := row.Scan(
-		&i.ID,
-		&i.EntityID,
-		&i.FromStatus,
-		&i.ToStatus,
-		&i.EntityVersion,
-		&i.Reason,
-		&i.ChangedBy,
-		&i.ChangedAt,
-	)
-	return i, err
+	return err
 }
 
 const listStatusHistory = `-- name: ListStatusHistory :many
@@ -102,4 +93,17 @@ func (q *Queries) ListStatusHistory(ctx context.Context, entityID uuid.UUID) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const transactionTime = `-- name: TransactionTime :one
+SELECT now()::timestamptz AS now
+`
+
+// now() is fixed for the whole transaction, so this equals the changed_at
+// and uploaded_at written in it.
+func (q *Queries) TransactionTime(ctx context.Context) (time.Time, error) {
+	row := q.db.QueryRow(ctx, transactionTime)
+	var now time.Time
+	err := row.Scan(&now)
+	return now, err
 }

@@ -34,6 +34,14 @@ type entityResponse struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// entityViewResponse is GET /entities/{id}: the Entity's fields plus its
+// Documents and Checks.
+type entityViewResponse struct {
+	entityResponse
+	Documents []documentResponse `json:"documents"`
+	Checks    []checkResponse    `json:"checks"`
+}
+
 func toEntityResponse(e kyc.Entity) entityResponse {
 	return entityResponse{
 		ID: e.ID, Type: string(e.Type), LegalName: e.LegalName, Country: e.Country,
@@ -66,10 +74,21 @@ func (h *handlers) getEntity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	observability.Annotate(r.Context(), slog.String("entity_id", id.String()))
-	e, err := h.svc.GetEntity(r.Context(), actorFrom(r.Context()), id)
+	view, err := h.svc.GetEntity(r.Context(), actorFrom(r.Context()), id)
 	if err != nil {
 		writeAppError(w, r, h.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toEntityResponse(e))
+	out := entityViewResponse{
+		entityResponse: toEntityResponse(view.Entity),
+		Documents:      make([]documentResponse, len(view.Documents)),
+		Checks:         make([]checkResponse, len(view.Checks)),
+	}
+	for i, d := range view.Documents {
+		out.Documents[i] = toDocumentResponse(d)
+	}
+	for i, c := range view.Checks {
+		out.Checks[i] = toCheckResponse(c) // raw_response omitted when withheld
+	}
+	writeJSON(w, http.StatusOK, out)
 }

@@ -14,3 +14,6 @@ UPDATE documents
 SET upload_status = 'uploaded', uploaded_at = now()
 WHERE id = $1 AND upload_status = 'awaiting_upload'
 RETURNING *;
+
+-- name: ListDocumentsForEntity :many
+SELECT * FROM documents WHERE entity_id = $1 ORDER BY created_at, id;

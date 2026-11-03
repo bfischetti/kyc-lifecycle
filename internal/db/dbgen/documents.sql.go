@@ -119,6 +119,44 @@ func (q *Queries) GetDocumentForUpdate(ctx context.Context, arg GetDocumentForUp
 	return i, err
 }
 
+const listDocumentsForEntity = `-- name: ListDocumentsForEntity :many
+SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at FROM documents WHERE entity_id = $1 ORDER BY created_at, id
+`
+
+func (q *Queries) ListDocumentsForEntity(ctx context.Context, entityID uuid.UUID) ([]Document, error) {
+	rows, err := q.db.Query(ctx, listDocumentsForEntity, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Document
+	for rows.Next() {
+		var i Document
+		if err := rows.Scan(
+			&i.ID,
+			&i.EntityID,
+			&i.DocType,
+			&i.ExpiryDate,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.Sha256,
+			&i.VaultKey,
+			&i.UploadStatus,
+			&i.UploadExpiresAt,
+			&i.UploadedAt,
+			&i.ReviewStatus,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markDocumentUploaded = `-- name: MarkDocumentUploaded :one
 UPDATE documents
 SET upload_status = 'uploaded', uploaded_at = now()

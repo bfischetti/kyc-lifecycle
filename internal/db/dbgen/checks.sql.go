@@ -7,6 +7,7 @@ package dbgen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -58,4 +59,54 @@ type InsertCheckPayloadParams struct {
 func (q *Queries) InsertCheckPayload(ctx context.Context, arg InsertCheckPayloadParams) error {
 	_, err := q.db.Exec(ctx, insertCheckPayload, arg.CheckID, arg.RawResponse)
 	return err
+}
+
+const listChecksWithPayloads = `-- name: ListChecksWithPayloads :many
+SELECT c.id, c.entity_id, c.check_type, c.provider, c.result, c.run_by, c.created_at, p.raw_response
+FROM checks c
+LEFT JOIN check_payloads p ON p.check_id = c.id
+WHERE c.entity_id = $1
+ORDER BY c.created_at, c.id
+`
+
+type ListChecksWithPayloadsRow struct {
+	ID          uuid.UUID
+	EntityID    uuid.UUID
+	CheckType   CheckType
+	Provider    string
+	Result      CheckResult
+	RunBy       uuid.UUID
+	CreatedAt   time.Time
+	RawResponse []byte
+}
+
+// The same query for every role. Row-level security decides whether the
+// payload row is visible; when it is not, raw_response comes back NULL.
+func (q *Queries) ListChecksWithPayloads(ctx context.Context, entityID uuid.UUID) ([]ListChecksWithPayloadsRow, error) {
+	rows, err := q.db.Query(ctx, listChecksWithPayloads, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChecksWithPayloadsRow
+	for rows.Next() {
+		var i ListChecksWithPayloadsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EntityID,
+			&i.CheckType,
+			&i.Provider,
+			&i.Result,
+			&i.RunBy,
+			&i.CreatedAt,
+			&i.RawResponse,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

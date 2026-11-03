@@ -15,6 +15,9 @@ import (
 func Handler(svc *app.Service, log *slog.Logger, ready func(*http.Request) error, m *metrics.Metrics) http.Handler {
 	h := &handlers{svc: svc, log: log}
 	auth := authenticate(svc, log)
+	// Only where a duplicate is harmful: a second Entity, a second paid
+	// provider call. Reviews are already safe: a retry is a Stale Decision.
+	idem := idempotent(svc, log)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -24,13 +27,13 @@ func Handler(svc *app.Service, log *slog.Logger, ready func(*http.Request) error
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	mux.Handle("POST /entities", auth(http.HandlerFunc(h.createEntity)))
+	mux.Handle("POST /entities", auth(idem(http.HandlerFunc(h.createEntity))))
 	mux.Handle("GET /entities/{id}", auth(http.HandlerFunc(h.getEntity)))
 	mux.Handle("POST /entities/{id}/documents", auth(http.HandlerFunc(h.declareDocument)))
 	mux.Handle("POST /entities/{id}/documents/{docID}/complete", auth(http.HandlerFunc(h.completeUpload)))
 	mux.Handle("GET /entities/{id}/documents/{docID}/content", auth(http.HandlerFunc(h.documentContent)))
 	mux.Handle("GET /entities/{id}/history", auth(http.HandlerFunc(h.history)))
-	mux.Handle("POST /entities/{id}/checks", auth(http.HandlerFunc(h.runCheck)))
+	mux.Handle("POST /entities/{id}/checks", auth(idem(http.HandlerFunc(h.runCheck))))
 	mux.Handle("POST /entities/{id}/review", auth(http.HandlerFunc(h.review)))
 	if m == nil {
 		return requestID(accessLog(log, recoverPanics(log, mux)))

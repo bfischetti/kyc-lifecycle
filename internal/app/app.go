@@ -51,6 +51,8 @@ type Options struct {
 	Metrics Recorder
 	// EvidenceURLTTL is how long an Evidence Access download URL works.
 	EvidenceURLTTL time.Duration
+	// Idempotency tunes Idempotency-Key handling; zero fields take defaults.
+	Idempotency IdempotencyOptions
 }
 
 // Recorder receives operational signals. Each is reported only once the
@@ -81,6 +83,16 @@ type Service struct {
 func New(store *db.Store, v Vault, p screening.Provider, opts Options) *Service {
 	if opts.Metrics == nil {
 		opts.Metrics = noRecorder{}
+	}
+	d := DefaultIdempotencyOptions
+	if opts.Idempotency.Wait == 0 {
+		opts.Idempotency.Wait = d.Wait
+	}
+	if opts.Idempotency.Lease == 0 {
+		opts.Idempotency.Lease = d.Lease
+	}
+	if opts.Idempotency.Poll == 0 {
+		opts.Idempotency.Poll = d.Poll
 	}
 	return &Service{store: store, vault: v, provider: p, opts: opts}
 }

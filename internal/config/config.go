@@ -11,11 +11,12 @@ import (
 
 // Serve is the configuration for `server serve`.
 type Serve struct {
-	DatabaseURL  string // runtime connection as the non-owner app role
-	HTTPAddr     string
-	LogLevel     string
-	Vault        Vault
-	UploadURLTTL time.Duration
+	DatabaseURL     string // runtime connection as the non-owner app role
+	HTTPAddr        string
+	LogLevel        string
+	Vault           Vault
+	UploadURLTTL    time.Duration
+	ProviderTimeout time.Duration
 }
 
 // Vault locates the Evidence Vault.
@@ -93,7 +94,8 @@ func LoadServe(getenv func(string) string) (Serve, error) {
 			SecretKey: r.required("VAULT_SECRET_KEY"),
 			Bucket:    r.optional("VAULT_BUCKET", "evidence"),
 		},
-		UploadURLTTL: r.duration("UPLOAD_URL_TTL", 15*time.Minute),
+		UploadURLTTL:    r.duration("UPLOAD_URL_TTL", 15*time.Minute),
+		ProviderTimeout: r.duration("PROVIDER_TIMEOUT", 5*time.Second),
 	}
 	return c, r.err()
 }

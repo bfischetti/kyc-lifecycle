@@ -33,6 +33,9 @@ func TestAllowed(t *testing.T) {
 		{ReadHistory, co, true},
 		{ReadHistory, sa, false},
 		{ReadHistory, sy, false},
+		{RunCheck, co, true},
+		{RunCheck, sa, false},
+		{RunCheck, sy, true},
 		{"entity.delete", co, false},
 	}
 	for _, tt := range tests {

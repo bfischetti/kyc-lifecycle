@@ -15,6 +15,7 @@ import (
 	"github.com/bfischetti/kyc-lifecycle/internal/db/dbgen"
 	"github.com/bfischetti/kyc-lifecycle/internal/kyc"
 	"github.com/bfischetti/kyc-lifecycle/internal/policy"
+	"github.com/bfischetti/kyc-lifecycle/internal/screening"
 	"github.com/bfischetti/kyc-lifecycle/internal/vault"
 )
 
@@ -28,6 +29,8 @@ var (
 	ErrGone = errors.New("gone")
 	// ErrUploadMismatch: the vault does not hold the declared bytes.
 	ErrUploadMismatch = errors.New("upload does not match declaration")
+	// ErrProviderUnavailable: a Provider Error; safe to retry.
+	ErrProviderUnavailable = errors.New("screening provider unavailable")
 )
 
 // Vault is the part of the Evidence Vault the use cases need.
@@ -41,20 +44,23 @@ type Vault interface {
 type Options struct {
 	// UploadURLTTL is how long an Upload Intent's permission stays valid.
 	UploadURLTTL time.Duration
+	// ProviderTimeout bounds each Screening Provider call.
+	ProviderTimeout time.Duration
 }
 
 // DefaultOptions are the production defaults.
-var DefaultOptions = Options{UploadURLTTL: 15 * time.Minute}
+var DefaultOptions = Options{UploadURLTTL: 15 * time.Minute, ProviderTimeout: 5 * time.Second}
 
 // Service exposes the use cases.
 type Service struct {
-	store *db.Store
-	vault Vault
-	opts  Options
+	store    *db.Store
+	vault    Vault
+	provider screening.Provider
+	opts     Options
 }
 
-func New(store *db.Store, v Vault, opts Options) *Service {
-	return &Service{store: store, vault: v, opts: opts}
+func New(store *db.Store, v Vault, p screening.Provider, opts Options) *Service {
+	return &Service{store: store, vault: v, provider: p, opts: opts}
 }
 
 // Authenticate resolves a user id to an Actor. The role always comes from the

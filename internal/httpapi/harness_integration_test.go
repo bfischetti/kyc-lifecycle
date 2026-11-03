@@ -20,6 +20,7 @@ import (
 	"github.com/bfischetti/kyc-lifecycle/internal/db"
 	"github.com/bfischetti/kyc-lifecycle/internal/httpapi"
 	"github.com/bfischetti/kyc-lifecycle/internal/observability"
+	"github.com/bfischetti/kyc-lifecycle/internal/screening"
 	"github.com/bfischetti/kyc-lifecycle/internal/testenv"
 	"github.com/bfischetti/kyc-lifecycle/internal/vault"
 )
@@ -60,10 +61,23 @@ type env struct {
 	vault testenv.Vault
 }
 
-type option func(*app.Options)
+type config struct {
+	opts     app.Options
+	provider screening.Provider
+}
+
+type option func(*config)
 
 func withUploadTTL(d time.Duration) option {
-	return func(o *app.Options) { o.UploadURLTTL = d }
+	return func(c *config) { c.opts.UploadURLTTL = d }
+}
+
+func withProviderTimeout(d time.Duration) option {
+	return func(c *config) { c.opts.ProviderTimeout = d }
+}
+
+func withProvider(p screening.Provider) option {
+	return func(c *config) { c.provider = p }
 }
 
 func setup(t *testing.T, opts ...option) *env {
@@ -77,9 +91,9 @@ func setup(t *testing.T, opts ...option) *env {
 	}
 	t.Cleanup(store.Close)
 
-	o := app.DefaultOptions
+	cfg := config{opts: app.DefaultOptions, provider: screening.Mock{}}
 	for _, opt := range opts {
-		opt(&o)
+		opt(&cfg)
 	}
 	evidence := vault.New(vault.Config{
 		Endpoint: vlt.Endpoint, Region: vlt.Region,
@@ -88,7 +102,7 @@ func setup(t *testing.T, opts ...option) *env {
 
 	logs := &syncBuffer{}
 	log := observability.NewLogger(logs, "debug")
-	srv := httptest.NewServer(httpapi.Handler(app.New(store, evidence, o), log, func(*http.Request) error { return nil }))
+	srv := httptest.NewServer(httpapi.Handler(app.New(store, evidence, cfg.provider, cfg.opts), log, func(*http.Request) error { return nil }))
 	t.Cleanup(srv.Close)
 	return &env{srv: srv, logs: logs, pg: pg, vault: vlt}
 }

@@ -20,6 +20,8 @@ type errorDetail struct {
 	Code    string           `json:"code"`
 	Message string           `json:"message"`
 	Fields  []kyc.FieldError `json:"fields,omitempty"`
+	// Retryable tells the client the same request may succeed later.
+	Retryable bool `json:"retryable,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -53,6 +55,13 @@ func writeAppError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err
 		writeError(w, r, log, http.StatusConflict, "conflict", err.Error(), nil)
 	case errors.Is(err, app.ErrGone):
 		writeError(w, r, log, http.StatusGone, "gone", err.Error(), nil)
+	case errors.Is(err, app.ErrProviderUnavailable):
+		// A Provider Error is an infrastructure problem, not a screening
+		// answer: nothing was recorded and the client should retry.
+		log.WarnContext(r.Context(), "screening provider unavailable", slog.String("error", err.Error()))
+		writeJSON(w, http.StatusBadGateway, errorBody{errorDetail{
+			Code: "provider_unavailable", Message: "screening provider unavailable; nothing was recorded", Retryable: true,
+		}})
 	case errors.Is(err, app.ErrUploadMismatch):
 		writeError(w, r, log, http.StatusUnprocessableEntity, "upload_mismatch", err.Error(), nil)
 	default:

@@ -21,7 +21,7 @@ func TestLoadServe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadServe() error = %v", err)
 	}
-	if c.HTTPAddr != ":8080" || c.LogLevel != "info" || c.UploadURLTTL != 15*time.Minute ||
+	if c.HTTPAddr != ":8080" || c.LogLevel != "info" || c.UploadURLTTL != 15*time.Minute || c.ProviderTimeout != 5*time.Second ||
 		c.Vault.Bucket != "evidence" || c.Vault.Region != "us-east-1" {
 		t.Errorf("defaults not applied: %+v", c)
 	}

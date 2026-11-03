@@ -95,6 +95,7 @@ func serve(ctx context.Context, args []string) error {
 		UploadURLTTL:    cfg.UploadURLTTL,
 		ProviderTimeout: cfg.ProviderTimeout,
 		Metrics:         m,
+		EvidenceURLTTL:  cfg.EvidenceURLTTL,
 	})
 
 	srv := &http.Server{

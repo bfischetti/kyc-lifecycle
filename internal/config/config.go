@@ -19,6 +19,8 @@ type Serve struct {
 	UploadURLTTL    time.Duration
 	ProviderTimeout time.Duration
 	Outbox          Outbox
+	// UploadSweepInterval is how often lapsed Upload Intents are expired.
+	UploadSweepInterval time.Duration
 }
 
 // Outbox tunes notification delivery.
@@ -121,6 +123,7 @@ func LoadServe(getenv func(string) string) (Serve, error) {
 			PollInterval: r.duration("OUTBOX_POLL_INTERVAL", time.Second),
 			MaxAttempts:  r.positiveInt("OUTBOX_MAX_ATTEMPTS", 10),
 		},
+		UploadSweepInterval: r.duration("UPLOAD_SWEEP_INTERVAL", time.Minute),
 	}
 	return c, r.err()
 }

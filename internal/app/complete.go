@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -48,7 +49,12 @@ func (s *Service) CompleteUpload(ctx context.Context, actor kyc.Actor, entityID,
 	case kyc.UploadComplete:
 		return documentFromRow(doc), entityFromRow(ent), nil
 	case kyc.UploadExpired:
-		return kyc.Document{}, kyc.Entity{}, fmt.Errorf("%w: upload permission expired; declare the document again", ErrGone)
+		return kyc.Document{}, kyc.Entity{}, errUploadExpired
+	}
+	// Lapsed but not yet swept. A fast path only, to skip the vault calls;
+	// the database's clock decides in step 3.
+	if !time.Now().Before(doc.UploadExpiresAt) {
+		return kyc.Document{}, kyc.Entity{}, errUploadExpired
 	}
 
 	// 2. Verify the bytes really are in the vault and match the declaration.
@@ -71,7 +77,7 @@ func (s *Service) CompleteUpload(ctx context.Context, actor kyc.Actor, entityID,
 			doc, ent = cur, locked
 			return nil
 		case kyc.UploadExpired:
-			return fmt.Errorf("%w: upload permission expired; declare the document again", ErrGone)
+			return errUploadExpired
 		}
 
 		// Check the transition is allowed before recording anything.
@@ -79,7 +85,11 @@ func (s *Service) CompleteUpload(ctx context.Context, actor kyc.Actor, entityID,
 		if _, err := kyc.Transition(from, kyc.EventCompletedUpload); err != nil {
 			return fmt.Errorf("%w: entity is %s", ErrConflict, from)
 		}
-		if doc, err = q.MarkDocumentUploaded(ctx, docID); err != nil {
+		doc, err = q.MarkDocumentUploaded(ctx, docID)
+		if db.IsNoRows(err) { // still awaiting upload, so the window lapsed
+			return errUploadExpired
+		}
+		if err != nil {
 			return fmt.Errorf("mark uploaded: %w", err)
 		}
 		ent, err = applyTransition(ctx, q, actor, locked, kyc.EventCompletedUpload, completionReason(from))
@@ -90,6 +100,8 @@ func (s *Service) CompleteUpload(ctx context.Context, actor kyc.Actor, entityID,
 	}
 	return documentFromRow(doc), entityFromRow(ent), nil
 }
+
+var errUploadExpired = fmt.Errorf("%w: upload permission expired; declare the document again", ErrGone)
 
 func completionReason(from kyc.Status) string {
 	if from == kyc.StatusRejected {

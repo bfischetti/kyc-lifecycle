@@ -22,6 +22,11 @@ type errorDetail struct {
 	Fields  []kyc.FieldError `json:"fields,omitempty"`
 	// Retryable tells the client the same request may succeed later.
 	Retryable bool `json:"retryable,omitempty"`
+	// Unmet lists approval requirements not yet satisfied.
+	Unmet []kyc.Unmet `json:"unmet,omitempty"`
+	// Current state, returned with a stale decision so the client can refresh.
+	CurrentStatus  string `json:"current_status,omitempty"`
+	CurrentVersion *int   `json:"current_version,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -45,7 +50,18 @@ func writeAppError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err
 		writeError(w, r, log, http.StatusBadRequest, "invalid_input", "request has invalid fields", ve.Fields)
 		return
 	}
+	var stale *app.StaleDecisionError
+	var unmet *app.UnmetRequirementsError
 	switch {
+	case errors.As(err, &stale):
+		writeJSON(w, http.StatusConflict, errorBody{errorDetail{
+			Code: "stale_decision", Message: stale.Error(),
+			CurrentStatus: string(stale.CurrentStatus), CurrentVersion: &stale.CurrentVersion,
+		}})
+	case errors.As(err, &unmet):
+		writeJSON(w, http.StatusConflict, errorBody{errorDetail{
+			Code: "approval_requirements_unmet", Message: unmet.Error(), Unmet: unmet.Unmet,
+		}})
 	case errors.Is(err, app.ErrForbidden):
 		writeError(w, r, log, http.StatusForbidden, "forbidden", "your role may not perform this action", nil)
 	case errors.Is(err, app.ErrNotFound):

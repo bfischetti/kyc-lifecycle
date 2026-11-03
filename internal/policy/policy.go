@@ -15,6 +15,7 @@ const (
 	CompleteUpload  Action = "document.complete"
 	ReadHistory     Action = "entity.history"
 	RunCheck        Action = "check.run"
+	Review          Action = "entity.review"
 )
 
 var grants = map[Action]map[kyc.Role]bool{
@@ -27,6 +28,8 @@ var grants = map[Action]map[kyc.Role]bool{
 	ReadHistory: {kyc.RoleComplianceOfficer: true},
 	// Screening is for compliance and automation; support agents only onboard.
 	RunCheck: {kyc.RoleComplianceOfficer: true, kyc.RoleSystem: true},
+	// Decisions are made by people with compliance authority, never by automation.
+	Review: {kyc.RoleComplianceOfficer: true},
 }
 
 // Allowed reports whether role may perform action. Unknown actions and roles

@@ -17,3 +17,17 @@ RETURNING *;
 
 -- name: ListDocumentsForEntity :many
 SELECT * FROM documents WHERE entity_id = $1 ORDER BY created_at, id;
+
+-- name: ListCompletedDocumentsSince :many
+SELECT * FROM documents
+WHERE entity_id = $1 AND upload_status = 'uploaded' AND uploaded_at >= sqlc.arg(since)
+ORDER BY uploaded_at, id;
+
+-- name: SettleCycleDocuments :exec
+-- Applies the Review Cycle's outcome to its Completed Uploads still pending review.
+UPDATE documents
+SET review_status = sqlc.arg(review_status)
+WHERE entity_id = sqlc.arg(entity_id)
+  AND upload_status = 'uploaded'
+  AND review_status = 'pending'
+  AND uploaded_at >= sqlc.arg(since);

@@ -12,6 +12,20 @@ import (
 	"github.com/google/uuid"
 )
 
+const currentCycleStart = `-- name: CurrentCycleStart :one
+SELECT max(changed_at)::timestamptz AS started_at
+FROM status_history
+WHERE entity_id = $1 AND to_status = 'pending_review'
+`
+
+// A Review Cycle starts when the Entity last entered pending_review.
+func (q *Queries) CurrentCycleStart(ctx context.Context, entityID uuid.UUID) (time.Time, error) {
+	row := q.db.QueryRow(ctx, currentCycleStart, entityID)
+	var started_at time.Time
+	err := row.Scan(&started_at)
+	return started_at, err
+}
+
 const insertOutbox = `-- name: InsertOutbox :exec
 INSERT INTO outbox (id, entity_id, event_type, payload)
 VALUES ($1, $2, $3, $4)

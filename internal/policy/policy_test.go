@@ -36,6 +36,9 @@ func TestAllowed(t *testing.T) {
 		{RunCheck, co, true},
 		{RunCheck, sa, false},
 		{RunCheck, sy, true},
+		{Review, co, true},
+		{Review, sa, false},
+		{Review, sy, false},
 		{"entity.delete", co, false},
 	}
 	for _, tt := range tests {

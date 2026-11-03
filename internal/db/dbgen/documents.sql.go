@@ -119,6 +119,51 @@ func (q *Queries) GetDocumentForUpdate(ctx context.Context, arg GetDocumentForUp
 	return i, err
 }
 
+const listCompletedDocumentsSince = `-- name: ListCompletedDocumentsSince :many
+SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at FROM documents
+WHERE entity_id = $1 AND upload_status = 'uploaded' AND uploaded_at >= $2
+ORDER BY uploaded_at, id
+`
+
+type ListCompletedDocumentsSinceParams struct {
+	EntityID uuid.UUID
+	Since    *time.Time
+}
+
+func (q *Queries) ListCompletedDocumentsSince(ctx context.Context, arg ListCompletedDocumentsSinceParams) ([]Document, error) {
+	rows, err := q.db.Query(ctx, listCompletedDocumentsSince, arg.EntityID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Document
+	for rows.Next() {
+		var i Document
+		if err := rows.Scan(
+			&i.ID,
+			&i.EntityID,
+			&i.DocType,
+			&i.ExpiryDate,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.Sha256,
+			&i.VaultKey,
+			&i.UploadStatus,
+			&i.UploadExpiresAt,
+			&i.UploadedAt,
+			&i.ReviewStatus,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDocumentsForEntity = `-- name: ListDocumentsForEntity :many
 SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at FROM documents WHERE entity_id = $1 ORDER BY created_at, id
 `
@@ -183,4 +228,25 @@ func (q *Queries) MarkDocumentUploaded(ctx context.Context, id uuid.UUID) (Docum
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const settleCycleDocuments = `-- name: SettleCycleDocuments :exec
+UPDATE documents
+SET review_status = $1
+WHERE entity_id = $2
+  AND upload_status = 'uploaded'
+  AND review_status = 'pending'
+  AND uploaded_at >= $3
+`
+
+type SettleCycleDocumentsParams struct {
+	ReviewStatus DocumentReviewStatus
+	EntityID     uuid.UUID
+	Since        *time.Time
+}
+
+// Applies the Review Cycle's outcome to its Completed Uploads still pending review.
+func (q *Queries) SettleCycleDocuments(ctx context.Context, arg SettleCycleDocumentsParams) error {
+	_, err := q.db.Exec(ctx, settleCycleDocuments, arg.ReviewStatus, arg.EntityID, arg.Since)
+	return err
 }

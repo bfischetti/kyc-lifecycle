@@ -15,3 +15,9 @@ SELECT * FROM status_history WHERE entity_id = $1 ORDER BY entity_version;
 -- name: InsertOutbox :exec
 INSERT INTO outbox (id, entity_id, event_type, payload)
 VALUES ($1, $2, $3, $4);
+
+-- name: CurrentCycleStart :one
+-- A Review Cycle starts when the Entity last entered pending_review.
+SELECT max(changed_at)::timestamptz AS started_at
+FROM status_history
+WHERE entity_id = $1 AND to_status = 'pending_review';

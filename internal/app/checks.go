@@ -90,10 +90,18 @@ func (s *Service) RunCheck(ctx context.Context, actor kyc.Actor, entityID uuid.U
 		}
 
 		ent = locked
-		if outcome.Result == kyc.ResultFail {
-			ent, err = applyTransition(ctx, q, systemActor, locked, kyc.EventHardFail, string(checkType)+" failed")
+		if outcome.Result != kyc.ResultFail {
+			return nil
 		}
-		return err
+		// Hard Fail: System Rejection, which also rejects the cycle's documents.
+		cycleStart, err := q.CurrentCycleStart(ctx, entityID)
+		if err != nil {
+			return fmt.Errorf("cycle start: %w", err)
+		}
+		if ent, err = applyTransition(ctx, q, systemActor, locked, kyc.EventHardFail, string(checkType)+" failed"); err != nil {
+			return err
+		}
+		return settleCycleDocuments(ctx, q, entityID, cycleStart, kyc.ReviewRejected)
 	})
 	if err != nil {
 		return kyc.Check{}, kyc.Entity{}, err

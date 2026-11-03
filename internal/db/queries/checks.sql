@@ -14,3 +14,8 @@ FROM checks c
 LEFT JOIN check_payloads p ON p.check_id = c.id
 WHERE c.entity_id = $1
 ORDER BY c.created_at, c.id;
+
+-- name: ListChecksSince :many
+SELECT * FROM checks
+WHERE entity_id = $1 AND created_at >= sqlc.arg(since)
+ORDER BY created_at, id;

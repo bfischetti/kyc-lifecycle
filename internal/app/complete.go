@@ -63,11 +63,13 @@ func (s *Service) CompleteUpload(ctx context.Context, actor kyc.Actor, entityID,
 	}
 
 	// 3. Record the Completed Upload and apply the transition atomically.
+	var before dbgen.Entity
 	err = s.store.InTx(ctx, actor, func(q *dbgen.Queries) error {
 		locked, err := q.GetEntityForUpdate(ctx, entityID)
 		if err != nil {
 			return fmt.Errorf("lock entity: %w", err)
 		}
+		before = locked
 		cur, err := q.GetDocumentForUpdate(ctx, dbgen.GetDocumentForUpdateParams{ID: docID, EntityID: entityID})
 		if err != nil {
 			return fmt.Errorf("lock document: %w", err)
@@ -98,6 +100,7 @@ func (s *Service) CompleteUpload(ctx context.Context, actor kyc.Actor, entityID,
 	if err != nil {
 		return kyc.Document{}, kyc.Entity{}, err
 	}
+	s.recordTransition(before, ent)
 	return documentFromRow(doc), entityFromRow(ent), nil
 }
 

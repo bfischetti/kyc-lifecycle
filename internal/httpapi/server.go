@@ -7,10 +7,12 @@ import (
 	"net/http"
 
 	"github.com/bfischetti/kyc-lifecycle/internal/app"
+	"github.com/bfischetti/kyc-lifecycle/internal/metrics"
 )
 
-// Handler builds the service's HTTP handler.
-func Handler(svc *app.Service, log *slog.Logger, ready func(*http.Request) error) http.Handler {
+// Handler builds the service's HTTP handler. With m nil there is no
+// /metrics endpoint and no latency recording.
+func Handler(svc *app.Service, log *slog.Logger, ready func(*http.Request) error, m *metrics.Metrics) http.Handler {
 	h := &handlers{svc: svc, log: log}
 	auth := authenticate(svc, log)
 
@@ -29,6 +31,11 @@ func Handler(svc *app.Service, log *slog.Logger, ready func(*http.Request) error
 	mux.Handle("GET /entities/{id}/history", auth(http.HandlerFunc(h.history)))
 	mux.Handle("POST /entities/{id}/checks", auth(http.HandlerFunc(h.runCheck)))
 	mux.Handle("POST /entities/{id}/review", auth(http.HandlerFunc(h.review)))
-
-	return requestID(accessLog(log, recoverPanics(log, mux)))
+	if m == nil {
+		return requestID(accessLog(log, recoverPanics(log, mux)))
+	}
+	// Unauthenticated, like /healthz: scrapers carry no user identity, and
+	// nothing here identifies an Entity or a person.
+	mux.Handle("GET /metrics", m.Handler())
+	return requestID(accessLog(log, observeLatency(m, recoverPanics(log, mux))))
 }

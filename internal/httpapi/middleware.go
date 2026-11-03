@@ -6,12 +6,14 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/bfischetti/kyc-lifecycle/internal/app"
 	"github.com/bfischetti/kyc-lifecycle/internal/kyc"
+	"github.com/bfischetti/kyc-lifecycle/internal/metrics"
 	"github.com/bfischetti/kyc-lifecycle/internal/observability"
 )
 
@@ -58,6 +60,42 @@ func accessLog(log *slog.Logger, next http.Handler) http.Handler {
 			slog.Duration("duration", time.Since(start)),
 		)
 	})
+}
+
+// observeLatency records request latency by route pattern. It must wrap the
+// mux directly (no request copy in between), since the mux sets r.Pattern
+// on the request it is given.
+func observeLatency(m *metrics.Metrics, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		m.ObserveHTTP(methodLabel(r.Method), routeLabel(r.Pattern), rec.status, time.Since(start))
+	})
+}
+
+// routeLabel turns a mux pattern such as "GET /entities/{id}" into
+// "/entities/{id}". Unmatched requests share one label, so arbitrary paths
+// cannot create series.
+func routeLabel(pattern string) string {
+	if pattern == "" {
+		return "unmatched"
+	}
+	if _, path, ok := strings.Cut(pattern, " "); ok {
+		return path
+	}
+	return pattern
+}
+
+// methodLabel bounds the method label too: the server accepts any token
+// as a method, so an unknown one could otherwise create series at will.
+func methodLabel(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodOptions:
+		return method
+	}
+	return "other"
 }
 
 func recoverPanics(log *slog.Logger, next http.Handler) http.Handler {

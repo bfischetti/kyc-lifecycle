@@ -174,6 +174,26 @@ func (q *Queries) MarkOutboxPublished(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const outboxBacklog = `-- name: OutboxBacklog :one
+SELECT
+    count(*) FILTER (WHERE published_at IS NULL AND dead_at IS NULL) AS pending,
+    count(*) FILTER (WHERE dead_at IS NOT NULL) AS dead
+FROM outbox
+`
+
+type OutboxBacklogRow struct {
+	Pending int64
+	Dead    int64
+}
+
+// Notifications not yet delivered: pending (still retried) and dead.
+func (q *Queries) OutboxBacklog(ctx context.Context) (OutboxBacklogRow, error) {
+	row := q.db.QueryRow(ctx, outboxBacklog)
+	var i OutboxBacklogRow
+	err := row.Scan(&i.Pending, &i.Dead)
+	return i, err
+}
+
 const transactionTime = `-- name: TransactionTime :one
 SELECT now()::timestamptz AS now
 `

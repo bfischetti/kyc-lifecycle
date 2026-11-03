@@ -20,6 +20,7 @@ import (
 	"github.com/bfischetti/kyc-lifecycle/internal/db"
 	"github.com/bfischetti/kyc-lifecycle/internal/httpapi"
 	"github.com/bfischetti/kyc-lifecycle/internal/observability"
+	"github.com/bfischetti/kyc-lifecycle/internal/screening"
 	"github.com/bfischetti/kyc-lifecycle/internal/vault"
 )
 
@@ -76,7 +77,10 @@ func serve(ctx context.Context) error {
 	defer store.Close()
 
 	evidence := vault.New(vault.Config(cfg.Vault))
-	svc := app.New(store, evidence, app.Options{UploadURLTTL: cfg.UploadURLTTL})
+	svc := app.New(store, evidence, screening.Mock{}, app.Options{
+		UploadURLTTL:    cfg.UploadURLTTL,
+		ProviderTimeout: cfg.ProviderTimeout,
+	})
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

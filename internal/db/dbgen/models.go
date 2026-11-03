@@ -13,6 +13,128 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type CheckResult string
+
+const (
+	CheckResultPass         CheckResult = "pass"
+	CheckResultFail         CheckResult = "fail"
+	CheckResultManualReview CheckResult = "manual_review"
+)
+
+func (e *CheckResult) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CheckResult(s)
+	case string:
+		*e = CheckResult(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CheckResult: %T", src)
+	}
+	return nil
+}
+
+type NullCheckResult struct {
+	CheckResult CheckResult
+	Valid       bool // Valid is true if CheckResult is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCheckResult) Scan(value interface{}) error {
+	if value == nil {
+		ns.CheckResult, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CheckResult.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCheckResult) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CheckResult), nil
+}
+
+func (e CheckResult) Valid() bool {
+	switch e {
+	case CheckResultPass,
+		CheckResultFail,
+		CheckResultManualReview:
+		return true
+	}
+	return false
+}
+
+func AllCheckResultValues() []CheckResult {
+	return []CheckResult{
+		CheckResultPass,
+		CheckResultFail,
+		CheckResultManualReview,
+	}
+}
+
+type CheckType string
+
+const (
+	CheckTypeSanctionsScreening  CheckType = "sanctions_screening"
+	CheckTypePepScreening        CheckType = "pep_screening"
+	CheckTypeAddressVerification CheckType = "address_verification"
+)
+
+func (e *CheckType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CheckType(s)
+	case string:
+		*e = CheckType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CheckType: %T", src)
+	}
+	return nil
+}
+
+type NullCheckType struct {
+	CheckType CheckType
+	Valid     bool // Valid is true if CheckType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCheckType) Scan(value interface{}) error {
+	if value == nil {
+		ns.CheckType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CheckType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCheckType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CheckType), nil
+}
+
+func (e CheckType) Valid() bool {
+	switch e {
+	case CheckTypeSanctionsScreening,
+		CheckTypePepScreening,
+		CheckTypeAddressVerification:
+		return true
+	}
+	return false
+}
+
+func AllCheckTypeValues() []CheckType {
+	return []CheckType{
+		CheckTypeSanctionsScreening,
+		CheckTypePepScreening,
+		CheckTypeAddressVerification,
+	}
+}
+
 type DocumentReviewStatus string
 
 const (
@@ -380,6 +502,21 @@ func AllUserRoleValues() []UserRole {
 		UserRoleSupportAgent,
 		UserRoleSystem,
 	}
+}
+
+type Check struct {
+	ID        uuid.UUID
+	EntityID  uuid.UUID
+	CheckType CheckType
+	Provider  string
+	Result    CheckResult
+	RunBy     uuid.UUID
+	CreatedAt time.Time
+}
+
+type CheckPayload struct {
+	CheckID     uuid.UUID
+	RawResponse []byte
 }
 
 type Document struct {

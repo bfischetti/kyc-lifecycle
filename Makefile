@@ -2,10 +2,13 @@
 -include .env
 export
 
-.PHONY: up down migrate serve build test test-integration lint sqlc
+.PHONY: up down migrate serve build test test-integration lint sqlc sink-logs
 
 up: ## Start local infrastructure
 	docker compose up -d --wait
+
+sink-logs: ## Follow the notifications the webhook-sink receives
+	docker compose logs -f webhook-sink
 
 down: ## Stop local infrastructure and delete its data
 	docker compose down -v

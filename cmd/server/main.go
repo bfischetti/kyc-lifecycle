@@ -71,6 +71,17 @@ func migrate(ctx context.Context) error {
 	return nil
 }
 
+// publisher sends signed webhooks when a URL is configured, and otherwise
+// logs each notification.
+func publisher(cfg config.Webhook, log *slog.Logger) outbox.Publisher {
+	if cfg.URL == "" {
+		log.Info("no WEBHOOK_URL set; notifications are logged, not sent")
+		return outbox.LogPublisher{Log: log}
+	}
+	log.Info("notifications are sent as signed webhooks", slog.String("url", cfg.URL))
+	return outbox.WebhookPublisher{URL: cfg.URL, Secret: cfg.Secret.Reveal()}
+}
+
 func serve(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	runWorker := flags.Bool("worker", true, "run background work (outbox delivery, upload expiry) in this process")
@@ -111,7 +122,7 @@ func serve(ctx context.Context, args []string) error {
 		opts := outbox.DefaultOptions
 		opts.PollInterval = cfg.Outbox.PollInterval
 		opts.MaxAttempts = cfg.Outbox.MaxAttempts
-		worker := outbox.NewWorker(store, outbox.LogPublisher{Log: log}, log, opts)
+		worker := outbox.NewWorker(store, publisher(cfg.Webhook, log), log, opts)
 		sweeper := expiry.NewSweeper(store, log, cfg.UploadSweepInterval)
 		background.Go(func() { worker.Run(ctx) })
 		background.Go(func() { sweeper.Run(ctx) })

@@ -38,15 +38,19 @@ func TestLoadServe(t *testing.T) {
 	if c.Outbox.PollInterval != time.Second || c.Outbox.MaxAttempts != 10 {
 		t.Errorf("outbox defaults not applied: %+v", c.Outbox)
 	}
+	if c.IdempotencyKeyRetention != 24*time.Hour {
+		t.Errorf("IdempotencyKeyRetention = %v, want 24h", c.IdempotencyKeyRetention)
+	}
 	if c.UploadSweepInterval != time.Minute {
 		t.Errorf("UploadSweepInterval = %v, want 1m", c.UploadSweepInterval)
 	}
 
 	for key, value := range map[string]string{
-		"UPLOAD_URL_TTL":        "soon",
-		"OUTBOX_POLL_INTERVAL":  "-1s",
-		"OUTBOX_MAX_ATTEMPTS":   "zero",
-		"UPLOAD_SWEEP_INTERVAL": "0s",
+		"UPLOAD_URL_TTL":            "soon",
+		"OUTBOX_POLL_INTERVAL":      "-1s",
+		"OUTBOX_MAX_ATTEMPTS":       "zero",
+		"UPLOAD_SWEEP_INTERVAL":     "0s",
+		"IDEMPOTENCY_KEY_RETENTION": "a day",
 	} {
 		bad := map[string]string{key: value}
 		for k, v := range required {

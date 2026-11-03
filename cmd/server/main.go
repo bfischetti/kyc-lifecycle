@@ -124,7 +124,7 @@ func serve(ctx context.Context, args []string) error {
 		opts.PollInterval = cfg.Outbox.PollInterval
 		opts.MaxAttempts = cfg.Outbox.MaxAttempts
 		worker := outbox.NewWorker(store, publisher(cfg.Webhook, log), log, opts)
-		sweeper := expiry.NewSweeper(store, log, cfg.UploadSweepInterval)
+		sweeper := expiry.NewSweeper(store, log, cfg.UploadSweepInterval, expiry.WithKeyRetention(cfg.IdempotencyKeyRetention))
 		background.Go(func() { worker.Run(ctx) })
 		background.Go(func() { sweeper.Run(ctx) })
 	} else {

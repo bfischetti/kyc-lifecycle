@@ -24,7 +24,9 @@ type Serve struct {
 	Outbox          Outbox
 	// UploadSweepInterval is how often lapsed Upload Intents are expired.
 	UploadSweepInterval time.Duration
-	Webhook             Webhook
+	// IdempotencyKeyRetention is how long idempotency keys are kept.
+	IdempotencyKeyRetention time.Duration
+	Webhook                 Webhook
 }
 
 // Webhook configures signed delivery of Status Change Notifications. With
@@ -166,8 +168,9 @@ func LoadServe(getenv func(string) string) (Serve, error) {
 			PollInterval: r.duration("OUTBOX_POLL_INTERVAL", time.Second),
 			MaxAttempts:  r.positiveInt("OUTBOX_MAX_ATTEMPTS", 10),
 		},
-		UploadSweepInterval: r.duration("UPLOAD_SWEEP_INTERVAL", time.Minute),
-		Webhook:             r.webhook(),
+		UploadSweepInterval:     r.duration("UPLOAD_SWEEP_INTERVAL", time.Minute),
+		IdempotencyKeyRetention: r.duration("IDEMPOTENCY_KEY_RETENTION", 24*time.Hour),
+		Webhook:                 r.webhook(),
 	}
 	return c, r.err()
 }

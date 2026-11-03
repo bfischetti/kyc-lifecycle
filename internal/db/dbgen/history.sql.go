@@ -10,7 +10,36 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const claimNextOutbox = `-- name: ClaimNextOutbox :one
+SELECT id, entity_id, event_type, payload, created_at, attempts, next_attempt_at, last_error, published_at, dead_at FROM outbox
+WHERE published_at IS NULL AND dead_at IS NULL AND next_attempt_at <= now()
+ORDER BY created_at, id
+LIMIT 1
+FOR UPDATE SKIP LOCKED
+`
+
+// Locks one due notification. SKIP LOCKED lets several workers run side by
+// side: each claims a different row, and none waits on another's.
+func (q *Queries) ClaimNextOutbox(ctx context.Context) (Outbox, error) {
+	row := q.db.QueryRow(ctx, claimNextOutbox)
+	var i Outbox
+	err := row.Scan(
+		&i.ID,
+		&i.EntityID,
+		&i.EventType,
+		&i.Payload,
+		&i.CreatedAt,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.LastError,
+		&i.PublishedAt,
+		&i.DeadAt,
+	)
+	return i, err
+}
 
 const currentCycleStart = `-- name: CurrentCycleStart :one
 SELECT max(changed_at)::timestamptz AS started_at
@@ -107,6 +136,42 @@ func (q *Queries) ListStatusHistory(ctx context.Context, entityID uuid.UUID) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const markOutboxFailed = `-- name: MarkOutboxFailed :exec
+UPDATE outbox
+SET attempts        = attempts + 1,
+    last_error      = $1,
+    next_attempt_at = $2,
+    dead_at         = CASE WHEN $3::boolean THEN now() END
+WHERE id = $4
+`
+
+type MarkOutboxFailedParams struct {
+	LastError     pgtype.Text
+	NextAttemptAt time.Time
+	Dead          bool
+	ID            uuid.UUID
+}
+
+func (q *Queries) MarkOutboxFailed(ctx context.Context, arg MarkOutboxFailedParams) error {
+	_, err := q.db.Exec(ctx, markOutboxFailed,
+		arg.LastError,
+		arg.NextAttemptAt,
+		arg.Dead,
+		arg.ID,
+	)
+	return err
+}
+
+const markOutboxPublished = `-- name: MarkOutboxPublished :exec
+UPDATE outbox SET published_at = now(), attempts = attempts + 1, last_error = NULL
+WHERE id = $1
+`
+
+func (q *Queries) MarkOutboxPublished(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markOutboxPublished, id)
+	return err
 }
 
 const transactionTime = `-- name: TransactionTime :one

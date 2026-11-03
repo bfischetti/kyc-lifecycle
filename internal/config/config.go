@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +18,13 @@ type Serve struct {
 	Vault           Vault
 	UploadURLTTL    time.Duration
 	ProviderTimeout time.Duration
+	Outbox          Outbox
+}
+
+// Outbox tunes notification delivery.
+type Outbox struct {
+	PollInterval time.Duration
+	MaxAttempts  int
 }
 
 // Vault locates the Evidence Vault.
@@ -70,6 +78,19 @@ func (r *reader) duration(key string, def time.Duration) time.Duration {
 	return d
 }
 
+func (r *reader) positiveInt(key string, def int) int {
+	v := strings.TrimSpace(r.getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		r.invalid = append(r.invalid, key+" (want a positive integer)")
+		return def
+	}
+	return n
+}
+
 func (r *reader) err() error {
 	if len(r.invalid) > 0 {
 		return fmt.Errorf("invalid environment variables: %s", strings.Join(r.invalid, ", "))
@@ -96,6 +117,10 @@ func LoadServe(getenv func(string) string) (Serve, error) {
 		},
 		UploadURLTTL:    r.duration("UPLOAD_URL_TTL", 15*time.Minute),
 		ProviderTimeout: r.duration("PROVIDER_TIMEOUT", 5*time.Second),
+		Outbox: Outbox{
+			PollInterval: r.duration("OUTBOX_POLL_INTERVAL", time.Second),
+			MaxAttempts:  r.positiveInt("OUTBOX_MAX_ATTEMPTS", 10),
+		},
 	}
 	return c, r.err()
 }

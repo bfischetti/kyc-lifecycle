@@ -157,12 +157,6 @@ Other magic names for the mock provider: `PEP` (manual review), `BADADDRESS` (ad
 
 ## Design
 
-### Why Go
-
-> ✏️ *Author: your reasons go here. A starting point:*
-
-The standard library covers most of this service. The router is `net/http` with method patterns, logging is `log/slog`, and there's no framework, so every request path can be read top to bottom. Queries are plain SQL compiled to typed Go by sqlc, so the SQL that runs is exactly the SQL in [`internal/db/queries/`](internal/db/queries/). The background worker and sweeper are goroutines with explicit cancellation. Deployment is a single static binary.
-
 ### The application enforces access; RLS is the backstop
 
 ([ADR-0001](docs/adr/0001-evidence-vault-with-rls-backstop.md))

@@ -59,6 +59,21 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 	return i, err
 }
 
+const expireLapsedUploads = `-- name: ExpireLapsedUploads :execrows
+UPDATE documents
+SET upload_status = 'expired'
+WHERE upload_status = 'awaiting_upload' AND upload_expires_at <= now()
+`
+
+// Turns Upload Intents whose permission has lapsed into Expired Uploads.
+func (q *Queries) ExpireLapsedUploads(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, expireLapsedUploads)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getDocument = `-- name: GetDocument :one
 SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at FROM documents WHERE id = $1 AND entity_id = $2
 `
@@ -205,10 +220,12 @@ func (q *Queries) ListDocumentsForEntity(ctx context.Context, entityID uuid.UUID
 const markDocumentUploaded = `-- name: MarkDocumentUploaded :one
 UPDATE documents
 SET upload_status = 'uploaded', uploaded_at = now()
-WHERE id = $1 AND upload_status = 'awaiting_upload'
+WHERE id = $1 AND upload_status = 'awaiting_upload' AND upload_expires_at > now()
 RETURNING id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at
 `
 
+// Matches nothing once the upload permission has lapsed: an Upload Intent
+// completes only within its window, even if the bytes arrived in time.
 func (q *Queries) MarkDocumentUploaded(ctx context.Context, id uuid.UUID) (Document, error) {
 	row := q.db.QueryRow(ctx, markDocumentUploaded, id)
 	var i Document

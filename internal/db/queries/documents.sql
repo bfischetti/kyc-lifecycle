@@ -10,10 +10,18 @@ SELECT * FROM documents WHERE id = $1 AND entity_id = $2;
 SELECT * FROM documents WHERE id = $1 AND entity_id = $2 FOR UPDATE;
 
 -- name: MarkDocumentUploaded :one
+-- Matches nothing once the upload permission has lapsed: an Upload Intent
+-- completes only within its window, even if the bytes arrived in time.
 UPDATE documents
 SET upload_status = 'uploaded', uploaded_at = now()
-WHERE id = $1 AND upload_status = 'awaiting_upload'
+WHERE id = $1 AND upload_status = 'awaiting_upload' AND upload_expires_at > now()
 RETURNING *;
+
+-- name: ExpireLapsedUploads :execrows
+-- Turns Upload Intents whose permission has lapsed into Expired Uploads.
+UPDATE documents
+SET upload_status = 'expired'
+WHERE upload_status = 'awaiting_upload' AND upload_expires_at <= now();
 
 -- name: ListDocumentsForEntity :many
 SELECT * FROM documents WHERE entity_id = $1 ORDER BY created_at, id;

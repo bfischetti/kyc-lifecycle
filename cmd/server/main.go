@@ -2,7 +2,9 @@
 //
 //	server migrate                apply database migrations (as the owner role)
 //	server serve [--worker=false] run the HTTP API and, unless disabled, the
-//	                              outbox worker that delivers notifications
+//	                              background work: the outbox worker that
+//	                              delivers notifications and the sweeper that
+//	                              expires abandoned Upload Intents
 package main
 
 import (
@@ -14,12 +16,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/bfischetti/kyc-lifecycle/internal/app"
 	"github.com/bfischetti/kyc-lifecycle/internal/config"
 	"github.com/bfischetti/kyc-lifecycle/internal/db"
+	"github.com/bfischetti/kyc-lifecycle/internal/expiry"
 	"github.com/bfischetti/kyc-lifecycle/internal/httpapi"
 	"github.com/bfischetti/kyc-lifecycle/internal/observability"
 	"github.com/bfischetti/kyc-lifecycle/internal/outbox"
@@ -68,7 +72,7 @@ func migrate(ctx context.Context) error {
 
 func serve(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
-	runWorker := flags.Bool("worker", true, "run the outbox worker in this process")
+	runWorker := flags.Bool("worker", true, "run background work (outbox delivery, upload expiry) in this process")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -99,16 +103,17 @@ func serve(ctx context.Context, args []string) error {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	var workerDone chan struct{}
+	var background sync.WaitGroup
 	if *runWorker {
 		opts := outbox.DefaultOptions
 		opts.PollInterval = cfg.Outbox.PollInterval
 		opts.MaxAttempts = cfg.Outbox.MaxAttempts
 		worker := outbox.NewWorker(store, outbox.LogPublisher{Log: log}, log, opts)
-		workerDone = make(chan struct{})
-		go func() { worker.Run(ctx); close(workerDone) }()
+		sweeper := expiry.NewSweeper(store, log, cfg.UploadSweepInterval)
+		background.Go(func() { worker.Run(ctx) })
+		background.Go(func() { sweeper.Run(ctx) })
 	} else {
-		log.InfoContext(ctx, "outbox worker disabled")
+		log.InfoContext(ctx, "background work disabled")
 	}
 
 	errc := make(chan error, 1)
@@ -129,8 +134,6 @@ func serve(ctx context.Context, args []string) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	err = srv.Shutdown(shutdownCtx)
-	if workerDone != nil {
-		<-workerDone // the worker stops on ctx cancellation; let it finish its transaction
-	}
+	background.Wait() // both stop on ctx cancellation; let them finish their transactions
 	return err
 }

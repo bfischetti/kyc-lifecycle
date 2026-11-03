@@ -55,6 +55,7 @@ func (s *Service) RunCheck(ctx context.Context, actor kyc.Actor, entityID uuid.U
 		Type: kyc.EntityType(ent.Type), LegalName: ent.LegalName, Country: ent.Country,
 	}, checkType)
 	if err != nil {
+		s.opts.Metrics.ProviderError(checkType)
 		if errors.Is(err, screening.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) {
 			return kyc.Check{}, kyc.Entity{}, fmt.Errorf("%w: %w", ErrProviderUnavailable, err)
 		}
@@ -65,6 +66,7 @@ func (s *Service) RunCheck(ctx context.Context, actor kyc.Actor, entityID uuid.U
 	//    was working, so re-check under lock; if it is no longer pending
 	//    review, the (paid) answer is discarded and nothing is recorded.
 	var chk dbgen.Check
+	var before dbgen.Entity
 	err = s.store.InTx(ctx, actor, func(q *dbgen.Queries) error {
 		locked, err := q.GetEntityForUpdate(ctx, entityID)
 		if err != nil {
@@ -73,6 +75,7 @@ func (s *Service) RunCheck(ctx context.Context, actor kyc.Actor, entityID uuid.U
 		if err := requirePendingReview(locked); err != nil {
 			return err
 		}
+		before = locked
 		chk, err = q.InsertCheck(ctx, dbgen.InsertCheckParams{
 			EntityID:  entityID,
 			CheckType: dbgen.CheckType(checkType),
@@ -106,6 +109,8 @@ func (s *Service) RunCheck(ctx context.Context, actor kyc.Actor, entityID uuid.U
 	if err != nil {
 		return kyc.Check{}, kyc.Entity{}, err
 	}
+	s.opts.Metrics.CheckRecorded(checkType, outcome.Result)
+	s.recordTransition(before, ent)
 	return checkFromRow(chk, outcome.RawResponse), entityFromRow(ent), nil
 }
 

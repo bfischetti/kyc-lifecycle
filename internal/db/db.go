@@ -65,6 +65,13 @@ func (s *Store) InTx(ctx context.Context, actor kyc.Actor, fn func(q *dbgen.Quer
 	})
 }
 
+// OutboxBacklog counts undelivered notifications: pending and dead. The
+// outbox has no row-level security, so no actor is needed.
+func (s *Store) OutboxBacklog(ctx context.Context) (pending, dead int64, err error) {
+	b, err := dbgen.New(s.pool).OutboxBacklog(ctx)
+	return b.Pending, b.Dead, err
+}
+
 // IsNoRows reports whether err means a query matched no rows.
 func IsNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 

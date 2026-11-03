@@ -46,7 +46,23 @@ type Options struct {
 	UploadURLTTL time.Duration
 	// ProviderTimeout bounds each Screening Provider call.
 	ProviderTimeout time.Duration
+	// Metrics receives operational signals; nil records nothing.
+	Metrics Recorder
 }
+
+// Recorder receives operational signals. Each is reported only once the
+// change it describes has been committed.
+type Recorder interface {
+	CheckRecorded(kyc.CheckType, kyc.CheckResult)
+	ProviderError(kyc.CheckType)
+	StatusChanged(from, to kyc.Status)
+}
+
+type noRecorder struct{}
+
+func (noRecorder) CheckRecorded(kyc.CheckType, kyc.CheckResult) {}
+func (noRecorder) ProviderError(kyc.CheckType)                  {}
+func (noRecorder) StatusChanged(kyc.Status, kyc.Status)         {}
 
 // DefaultOptions are the production defaults.
 var DefaultOptions = Options{UploadURLTTL: 15 * time.Minute, ProviderTimeout: 5 * time.Second}
@@ -60,7 +76,17 @@ type Service struct {
 }
 
 func New(store *db.Store, v Vault, p screening.Provider, opts Options) *Service {
+	if opts.Metrics == nil {
+		opts.Metrics = noRecorder{}
+	}
 	return &Service{store: store, vault: v, provider: p, opts: opts}
+}
+
+// recordTransition reports a committed status change, if there was one.
+func (s *Service) recordTransition(before, after dbgen.Entity) {
+	if after.Status != before.Status {
+		s.opts.Metrics.StatusChanged(kyc.Status(before.Status), kyc.Status(after.Status))
+	}
 }
 
 // Authenticate resolves a user id to an Actor. The role always comes from the

@@ -87,7 +87,7 @@ func (s *Service) Review(ctx context.Context, actor kyc.Actor, entityID uuid.UUI
 		return kyc.Entity{}, err
 	}
 
-	var out dbgen.Entity
+	var before, out dbgen.Entity
 	err := s.store.InTx(ctx, actor, func(q *dbgen.Queries) error {
 		locked, err := q.GetEntityForUpdate(ctx, entityID)
 		if db.IsNoRows(err) {
@@ -96,6 +96,7 @@ func (s *Service) Review(ctx context.Context, actor kyc.Actor, entityID uuid.UUI
 		if err != nil {
 			return fmt.Errorf("lock entity: %w", err)
 		}
+		before = locked
 		if int(locked.Version) != *req.ExpectedVersion {
 			return &StaleDecisionError{CurrentStatus: kyc.Status(locked.Status), CurrentVersion: int(locked.Version)}
 		}
@@ -125,7 +126,11 @@ func (s *Service) Review(ctx context.Context, actor kyc.Actor, entityID uuid.UUI
 		}
 		return settleCycleDocuments(ctx, q, entityID, cycleStart, settle)
 	})
-	return entityFromRow(out), err
+	if err != nil {
+		return kyc.Entity{}, err
+	}
+	s.recordTransition(before, out)
+	return entityFromRow(out), nil
 }
 
 func (s *Service) unmetForApproval(ctx context.Context, q *dbgen.Queries, e dbgen.Entity, cycleStart time.Time) ([]kyc.Unmet, error) {

@@ -42,3 +42,10 @@ SET attempts        = attempts + 1,
     next_attempt_at = sqlc.arg(next_attempt_at),
     dead_at         = CASE WHEN sqlc.arg(dead)::boolean THEN now() END
 WHERE id = sqlc.arg(id);
+
+-- name: OutboxBacklog :one
+-- Notifications not yet delivered: pending (still retried) and dead.
+SELECT
+    count(*) FILTER (WHERE published_at IS NULL AND dead_at IS NULL) AS pending,
+    count(*) FILTER (WHERE dead_at IS NOT NULL) AS dead
+FROM outbox;

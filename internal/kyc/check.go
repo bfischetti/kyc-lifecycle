@@ -16,6 +16,12 @@ const (
 	CheckAddress   CheckType = "address_verification"
 )
 
+// CheckTypes and CheckResults list every value.
+var (
+	CheckTypes   = []CheckType{CheckSanctions, CheckPEP, CheckAddress}
+	CheckResults = []CheckResult{ResultPass, ResultFail, ResultManualReview}
+)
+
 func (t CheckType) Valid() bool {
 	return t == CheckSanctions || t == CheckPEP || t == CheckAddress
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/bfischetti/kyc-lifecycle/internal/app"
 	"github.com/bfischetti/kyc-lifecycle/internal/db"
 	"github.com/bfischetti/kyc-lifecycle/internal/httpapi"
+	"github.com/bfischetti/kyc-lifecycle/internal/metrics"
 	"github.com/bfischetti/kyc-lifecycle/internal/observability"
 	"github.com/bfischetti/kyc-lifecycle/internal/screening"
 	"github.com/bfischetti/kyc-lifecycle/internal/testenv"
@@ -102,7 +103,9 @@ func setup(t *testing.T, opts ...option) *env {
 
 	logs := &syncBuffer{}
 	log := observability.NewLogger(logs, "debug")
-	srv := httptest.NewServer(httpapi.Handler(app.New(store, evidence, cfg.provider, cfg.opts), log, func(*http.Request) error { return nil }))
+	m := metrics.New(store.OutboxBacklog, log)
+	cfg.opts.Metrics = m
+	srv := httptest.NewServer(httpapi.Handler(app.New(store, evidence, cfg.provider, cfg.opts), log, func(*http.Request) error { return nil }, m))
 	t.Cleanup(srv.Close)
 	return &env{srv: srv, logs: logs, pg: pg, vault: vlt}
 }

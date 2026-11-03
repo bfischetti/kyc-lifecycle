@@ -554,6 +554,16 @@ type EvidenceAccess struct {
 	AccessedAt time.Time
 }
 
+type IdempotencyKey struct {
+	UserID         uuid.UUID
+	Key            string
+	Fingerprint    []byte
+	StartedAt      time.Time
+	ResponseStatus pgtype.Int4
+	ResponseBody   []byte
+	CompletedAt    *time.Time
+}
+
 type Outbox struct {
 	ID            uuid.UUID
 	EntityID      uuid.UUID

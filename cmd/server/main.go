@@ -20,6 +20,7 @@ import (
 	"github.com/bfischetti/kyc-lifecycle/internal/db"
 	"github.com/bfischetti/kyc-lifecycle/internal/httpapi"
 	"github.com/bfischetti/kyc-lifecycle/internal/observability"
+	"github.com/bfischetti/kyc-lifecycle/internal/vault"
 )
 
 const usage = "usage: server <migrate|serve>"
@@ -74,9 +75,12 @@ func serve(ctx context.Context) error {
 	}
 	defer store.Close()
 
+	evidence := vault.New(vault.Config(cfg.Vault))
+	svc := app.New(store, evidence, app.Options{UploadURLTTL: cfg.UploadURLTTL})
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.Handler(app.New(store), log, func(r *http.Request) error { return store.Ping(r.Context()) }),
+		Handler:           httpapi.Handler(svc, log, func(r *http.Request) error { return store.Ping(r.Context()) }),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

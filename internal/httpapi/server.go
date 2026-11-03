@@ -24,6 +24,7 @@ func Handler(svc *app.Service, log *slog.Logger, ready func(*http.Request) error
 	})
 	mux.Handle("POST /entities", auth(http.HandlerFunc(h.createEntity)))
 	mux.Handle("GET /entities/{id}", auth(http.HandlerFunc(h.getEntity)))
+	mux.Handle("POST /entities/{id}/documents", auth(http.HandlerFunc(h.declareDocument)))
 
 	return requestID(accessLog(log, recoverPanics(log, mux)))
 }

@@ -61,9 +61,8 @@ func (h *handlers) createEntity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) getEntity(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		writeError(w, r, h.log, http.StatusNotFound, "not_found", "resource not found", nil)
+	id, ok := pathUUID(w, r, h, "id")
+	if !ok {
 		return
 	}
 	observability.Annotate(r.Context(), slog.String("entity_id", id.String()))

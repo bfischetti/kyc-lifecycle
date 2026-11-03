@@ -12,6 +12,131 @@ import (
 	"github.com/google/uuid"
 )
 
+type DocumentReviewStatus string
+
+const (
+	DocumentReviewStatusPending  DocumentReviewStatus = "pending"
+	DocumentReviewStatusAccepted DocumentReviewStatus = "accepted"
+	DocumentReviewStatusRejected DocumentReviewStatus = "rejected"
+)
+
+func (e *DocumentReviewStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DocumentReviewStatus(s)
+	case string:
+		*e = DocumentReviewStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DocumentReviewStatus: %T", src)
+	}
+	return nil
+}
+
+type NullDocumentReviewStatus struct {
+	DocumentReviewStatus DocumentReviewStatus
+	Valid                bool // Valid is true if DocumentReviewStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDocumentReviewStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.DocumentReviewStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DocumentReviewStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDocumentReviewStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DocumentReviewStatus), nil
+}
+
+func (e DocumentReviewStatus) Valid() bool {
+	switch e {
+	case DocumentReviewStatusPending,
+		DocumentReviewStatusAccepted,
+		DocumentReviewStatusRejected:
+		return true
+	}
+	return false
+}
+
+func AllDocumentReviewStatusValues() []DocumentReviewStatus {
+	return []DocumentReviewStatus{
+		DocumentReviewStatusPending,
+		DocumentReviewStatusAccepted,
+		DocumentReviewStatusRejected,
+	}
+}
+
+type DocumentType string
+
+const (
+	DocumentTypePassport             DocumentType = "passport"
+	DocumentTypeNationalID           DocumentType = "national_id"
+	DocumentTypeBusinessRegistration DocumentType = "business_registration"
+	DocumentTypeProofOfAddress       DocumentType = "proof_of_address"
+)
+
+func (e *DocumentType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DocumentType(s)
+	case string:
+		*e = DocumentType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DocumentType: %T", src)
+	}
+	return nil
+}
+
+type NullDocumentType struct {
+	DocumentType DocumentType
+	Valid        bool // Valid is true if DocumentType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDocumentType) Scan(value interface{}) error {
+	if value == nil {
+		ns.DocumentType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DocumentType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDocumentType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DocumentType), nil
+}
+
+func (e DocumentType) Valid() bool {
+	switch e {
+	case DocumentTypePassport,
+		DocumentTypeNationalID,
+		DocumentTypeBusinessRegistration,
+		DocumentTypeProofOfAddress:
+		return true
+	}
+	return false
+}
+
+func AllDocumentTypeValues() []DocumentType {
+	return []DocumentType{
+		DocumentTypePassport,
+		DocumentTypeNationalID,
+		DocumentTypeBusinessRegistration,
+		DocumentTypeProofOfAddress,
+	}
+}
+
 type EntityStatus string
 
 const (
@@ -134,6 +259,67 @@ func AllEntityTypeValues() []EntityType {
 	}
 }
 
+type UploadStatus string
+
+const (
+	UploadStatusAwaitingUpload UploadStatus = "awaiting_upload"
+	UploadStatusUploaded       UploadStatus = "uploaded"
+	UploadStatusExpired        UploadStatus = "expired"
+)
+
+func (e *UploadStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UploadStatus(s)
+	case string:
+		*e = UploadStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UploadStatus: %T", src)
+	}
+	return nil
+}
+
+type NullUploadStatus struct {
+	UploadStatus UploadStatus
+	Valid        bool // Valid is true if UploadStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUploadStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.UploadStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UploadStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUploadStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UploadStatus), nil
+}
+
+func (e UploadStatus) Valid() bool {
+	switch e {
+	case UploadStatusAwaitingUpload,
+		UploadStatusUploaded,
+		UploadStatusExpired:
+		return true
+	}
+	return false
+}
+
+func AllUploadStatusValues() []UploadStatus {
+	return []UploadStatus{
+		UploadStatusAwaitingUpload,
+		UploadStatusUploaded,
+		UploadStatusExpired,
+	}
+}
+
 type UserRole string
 
 const (
@@ -193,6 +379,22 @@ func AllUserRoleValues() []UserRole {
 		UserRoleSupportAgent,
 		UserRoleSystem,
 	}
+}
+
+type Document struct {
+	ID              uuid.UUID
+	EntityID        uuid.UUID
+	DocType         DocumentType
+	ExpiryDate      *time.Time
+	ContentType     string
+	SizeBytes       int64
+	Sha256          string
+	VaultKey        string
+	UploadStatus    UploadStatus
+	UploadExpiresAt time.Time
+	UploadedAt      *time.Time
+	ReviewStatus    DocumentReviewStatus
+	CreatedAt       time.Time
 }
 
 type Entity struct {

@@ -100,3 +100,15 @@ func (n *NewEntity) Validate() error {
 	}
 	return nil
 }
+
+// StatusChange is one audit record: a single change of Verification Status.
+type StatusChange struct {
+	ID            uuid.UUID
+	EntityID      uuid.UUID
+	From          Status
+	To            Status
+	EntityVersion int // the version this change produced
+	Reason        string
+	ChangedBy     uuid.UUID
+	ChangedAt     time.Time
+}

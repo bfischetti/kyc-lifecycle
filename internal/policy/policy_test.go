@@ -27,6 +27,12 @@ func TestAllowed(t *testing.T) {
 		{DeclareDocument, co, true},
 		{DeclareDocument, sa, true},
 		{DeclareDocument, sy, false},
+		{CompleteUpload, co, true},
+		{CompleteUpload, sa, true},
+		{CompleteUpload, sy, false},
+		{ReadHistory, co, true},
+		{ReadHistory, sa, false},
+		{ReadHistory, sy, false},
 		{"entity.delete", co, false},
 	}
 	for _, tt := range tests {

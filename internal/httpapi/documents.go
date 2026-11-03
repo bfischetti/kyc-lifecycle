@@ -100,3 +100,30 @@ func pathUUID(w http.ResponseWriter, r *http.Request, h *handlers, name string) 
 	}
 	return id, true
 }
+
+type completeUploadResponse struct {
+	Document documentResponse `json:"document"`
+	Entity   entityResponse   `json:"entity"`
+}
+
+func (h *handlers) completeUpload(w http.ResponseWriter, r *http.Request) {
+	entityID, ok := pathUUID(w, r, h, "id")
+	if !ok {
+		return
+	}
+	docID, ok := pathUUID(w, r, h, "docID")
+	if !ok {
+		return
+	}
+	observability.Annotate(r.Context(),
+		slog.String("entity_id", entityID.String()), slog.String("document_id", docID.String()))
+
+	doc, ent, err := h.svc.CompleteUpload(r.Context(), actorFrom(r.Context()), entityID, docID)
+	if err != nil {
+		writeAppError(w, r, h.log, err)
+		return
+	}
+	h.log.InfoContext(r.Context(), "upload completed",
+		slog.String("entity_status", string(ent.Status)), slog.Int("entity_version", ent.Version))
+	writeJSON(w, http.StatusOK, completeUploadResponse{Document: toDocumentResponse(doc), Entity: toEntityResponse(ent)})
+}

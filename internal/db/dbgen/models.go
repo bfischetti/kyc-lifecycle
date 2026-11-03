@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type DocumentReviewStatus string
@@ -406,6 +407,30 @@ type Entity struct {
 	Version   int32
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type Outbox struct {
+	ID            uuid.UUID
+	EntityID      uuid.UUID
+	EventType     string
+	Payload       []byte
+	CreatedAt     time.Time
+	Attempts      int32
+	NextAttemptAt time.Time
+	LastError     pgtype.Text
+	PublishedAt   *time.Time
+	DeadAt        *time.Time
+}
+
+type StatusHistory struct {
+	ID            uuid.UUID
+	EntityID      uuid.UUID
+	FromStatus    EntityStatus
+	ToStatus      EntityStatus
+	EntityVersion int32
+	Reason        string
+	ChangedBy     uuid.UUID
+	ChangedAt     time.Time
 }
 
 type User struct {

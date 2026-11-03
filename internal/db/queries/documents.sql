@@ -2,3 +2,15 @@
 INSERT INTO documents (entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_expires_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
+
+-- name: GetDocument :one
+SELECT * FROM documents WHERE id = $1 AND entity_id = $2;
+
+-- name: GetDocumentForUpdate :one
+SELECT * FROM documents WHERE id = $1 AND entity_id = $2 FOR UPDATE;
+
+-- name: MarkDocumentUploaded :one
+UPDATE documents
+SET upload_status = 'uploaded', uploaded_at = now()
+WHERE id = $1 AND upload_status = 'awaiting_upload'
+RETURNING *;

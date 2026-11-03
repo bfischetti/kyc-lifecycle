@@ -58,3 +58,54 @@ func (q *Queries) GetEntity(ctx context.Context, id uuid.UUID) (Entity, error) {
 	)
 	return i, err
 }
+
+const getEntityForUpdate = `-- name: GetEntityForUpdate :one
+SELECT id, type, legal_name, country, status, version, created_at, updated_at FROM entities WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) GetEntityForUpdate(ctx context.Context, id uuid.UUID) (Entity, error) {
+	row := q.db.QueryRow(ctx, getEntityForUpdate, id)
+	var i Entity
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.LegalName,
+		&i.Country,
+		&i.Status,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateEntityStatus = `-- name: UpdateEntityStatus :one
+UPDATE entities
+SET status = $3, version = version + 1, updated_at = now()
+WHERE id = $1 AND version = $2
+RETURNING id, type, legal_name, country, status, version, created_at, updated_at
+`
+
+type UpdateEntityStatusParams struct {
+	ID      uuid.UUID
+	Version int32
+	Status  EntityStatus
+}
+
+// Guarded by the expected version so a lost update is impossible even if a
+// caller forgot to lock.
+func (q *Queries) UpdateEntityStatus(ctx context.Context, arg UpdateEntityStatusParams) (Entity, error) {
+	row := q.db.QueryRow(ctx, updateEntityStatus, arg.ID, arg.Version, arg.Status)
+	var i Entity
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.LegalName,
+		&i.Country,
+		&i.Status,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

@@ -49,6 +49,18 @@ services:
         done
         echo "vault not reachable" >&2; exit 1
 
+  # Stand-in Downstream Consumer: verifies and logs the signed Status Change
+  # Notifications the app sends to WEBHOOK_URL. Watch it with
+  # `docker compose logs -f webhook-sink`.
+  webhook-sink:
+    build:
+      context: .
+      dockerfile: deploy/webhook-sink/Dockerfile
+    environment:
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:?set in .env}
+    ports:
+      - "${WEBHOOK_SINK_PORT:-8090}:8090"
+
 volumes:
   pgdata:
   vaultdata:

@@ -4,6 +4,8 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -21,7 +23,27 @@ type Serve struct {
 	Outbox          Outbox
 	// UploadSweepInterval is how often lapsed Upload Intents are expired.
 	UploadSweepInterval time.Duration
+	Webhook             Webhook
 }
+
+// Webhook configures signed delivery of Status Change Notifications. With
+// no URL, notifications are logged instead of sent.
+type Webhook struct {
+	URL    string
+	Secret Secret
+}
+
+// MinWebhookSecretLength is the shortest accepted signing secret.
+const MinWebhookSecretLength = 32
+
+// Secret is a string that never prints: formatting or logging it gives
+// "[redacted]", so it cannot leak through a stray log line or error.
+type Secret string
+
+func (Secret) String() string       { return "[redacted]" }
+func (Secret) GoString() string     { return "[redacted]" }
+func (Secret) LogValue() slog.Value { return slog.StringValue("[redacted]") }
+func (s Secret) Reveal() []byte     { return []byte(s) }
 
 // Outbox tunes notification delivery.
 type Outbox struct {
@@ -93,6 +115,25 @@ func (r *reader) positiveInt(key string, def int) int {
 	return n
 }
 
+// webhook reads WEBHOOK_URL and, only when it is set, WEBHOOK_SECRET.
+func (r *reader) webhook() Webhook {
+	raw := strings.TrimSpace(r.getenv("WEBHOOK_URL"))
+	if raw == "" {
+		return Webhook{}
+	}
+	if u, err := url.Parse(raw); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		r.invalid = append(r.invalid, "WEBHOOK_URL (want an http or https URL)")
+	}
+	secret := r.getenv("WEBHOOK_SECRET")
+	switch {
+	case secret == "":
+		r.missing = append(r.missing, "WEBHOOK_SECRET")
+	case len(secret) < MinWebhookSecretLength:
+		r.invalid = append(r.invalid, fmt.Sprintf("WEBHOOK_SECRET (want at least %d characters)", MinWebhookSecretLength))
+	}
+	return Webhook{URL: raw, Secret: Secret(secret)}
+}
+
 func (r *reader) err() error {
 	if len(r.invalid) > 0 {
 		return fmt.Errorf("invalid environment variables: %s", strings.Join(r.invalid, ", "))
@@ -124,6 +165,7 @@ func LoadServe(getenv func(string) string) (Serve, error) {
 			MaxAttempts:  r.positiveInt("OUTBOX_MAX_ATTEMPTS", 10),
 		},
 		UploadSweepInterval: r.duration("UPLOAD_SWEEP_INTERVAL", time.Minute),
+		Webhook:             r.webhook(),
 	}
 	return c, r.err()
 }

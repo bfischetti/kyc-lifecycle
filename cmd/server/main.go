@@ -1,12 +1,14 @@
 // Command server runs the KYC lifecycle service.
 //
-//	server migrate   apply database migrations (as the owner role)
-//	server serve     run the HTTP API
+//	server migrate                apply database migrations (as the owner role)
+//	server serve [--worker=false] run the HTTP API and, unless disabled, the
+//	                              outbox worker that delivers notifications
 package main
 
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,11 +22,12 @@ import (
 	"github.com/bfischetti/kyc-lifecycle/internal/db"
 	"github.com/bfischetti/kyc-lifecycle/internal/httpapi"
 	"github.com/bfischetti/kyc-lifecycle/internal/observability"
+	"github.com/bfischetti/kyc-lifecycle/internal/outbox"
 	"github.com/bfischetti/kyc-lifecycle/internal/screening"
 	"github.com/bfischetti/kyc-lifecycle/internal/vault"
 )
 
-const usage = "usage: server <migrate|serve>"
+const usage = "usage: server migrate | server serve [--worker=false]"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -39,7 +42,7 @@ func main() {
 	case "migrate":
 		err = migrate(ctx)
 	case "serve":
-		err = serve(ctx)
+		err = serve(ctx, os.Args[2:])
 	default:
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
@@ -63,7 +66,12 @@ func migrate(ctx context.Context) error {
 	return nil
 }
 
-func serve(ctx context.Context) error {
+func serve(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	runWorker := flags.Bool("worker", true, "run the outbox worker in this process")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
 	cfg, err := config.LoadServe(config.Getenv)
 	if err != nil {
 		return err
@@ -91,6 +99,18 @@ func serve(ctx context.Context) error {
 		IdleTimeout:       120 * time.Second,
 	}
 
+	var workerDone chan struct{}
+	if *runWorker {
+		opts := outbox.DefaultOptions
+		opts.PollInterval = cfg.Outbox.PollInterval
+		opts.MaxAttempts = cfg.Outbox.MaxAttempts
+		worker := outbox.NewWorker(store, outbox.LogPublisher{Log: log}, log, opts)
+		workerDone = make(chan struct{})
+		go func() { worker.Run(ctx); close(workerDone) }()
+	} else {
+		log.InfoContext(ctx, "outbox worker disabled")
+	}
+
 	errc := make(chan error, 1)
 	go func() {
 		log.InfoContext(ctx, "listening", slog.String("addr", cfg.HTTPAddr))
@@ -108,5 +128,9 @@ func serve(ctx context.Context) error {
 	log.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	err = srv.Shutdown(shutdownCtx)
+	if workerDone != nil {
+		<-workerDone // the worker stops on ctx cancellation; let it finish its transaction
+	}
+	return err
 }

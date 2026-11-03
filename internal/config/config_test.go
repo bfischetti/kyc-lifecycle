@@ -33,12 +33,22 @@ func TestLoadServe(t *testing.T) {
 		}
 	}
 
-	bad := map[string]string{"UPLOAD_URL_TTL": "soon"}
-	for k, v := range required {
-		bad[k] = v
+	if c.Outbox.PollInterval != time.Second || c.Outbox.MaxAttempts != 10 {
+		t.Errorf("outbox defaults not applied: %+v", c.Outbox)
 	}
-	if _, err := LoadServe(env(bad)); err == nil || !strings.Contains(err.Error(), "UPLOAD_URL_TTL") {
-		t.Errorf("LoadServe(bad ttl) error = %v, want one naming UPLOAD_URL_TTL", err)
+
+	for key, value := range map[string]string{
+		"UPLOAD_URL_TTL":       "soon",
+		"OUTBOX_POLL_INTERVAL": "-1s",
+		"OUTBOX_MAX_ATTEMPTS":  "zero",
+	} {
+		bad := map[string]string{key: value}
+		for k, v := range required {
+			bad[k] = v
+		}
+		if _, err := LoadServe(env(bad)); err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("LoadServe(%s=%q) error = %v, want one naming %s", key, value, err, key)
+		}
 	}
 }
 

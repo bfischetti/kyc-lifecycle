@@ -546,6 +546,14 @@ type Entity struct {
 	UpdatedAt time.Time
 }
 
+type EvidenceAccess struct {
+	ID         uuid.UUID
+	DocumentID uuid.UUID
+	EntityID   uuid.UUID
+	AccessedBy uuid.UUID
+	AccessedAt time.Time
+}
+
 type Outbox struct {
 	ID            uuid.UUID
 	EntityID      uuid.UUID

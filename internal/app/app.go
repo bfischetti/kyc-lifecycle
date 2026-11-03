@@ -38,6 +38,7 @@ type Vault interface {
 	PresignUpload(ctx context.Context, key string, d vault.Declared, ttl time.Duration) (vault.UploadPermission, error)
 	Stat(ctx context.Context, key string) (vault.ObjectInfo, error)
 	ReadPrefix(ctx context.Context, key string, n int) ([]byte, error)
+	PresignDownload(ctx context.Context, key, filename string, ttl time.Duration) (vault.DownloadPermission, error)
 }
 
 // Options tunes use-case behaviour.
@@ -48,6 +49,8 @@ type Options struct {
 	ProviderTimeout time.Duration
 	// Metrics receives operational signals; nil records nothing.
 	Metrics Recorder
+	// EvidenceURLTTL is how long an Evidence Access download URL works.
+	EvidenceURLTTL time.Duration
 }
 
 // Recorder receives operational signals. Each is reported only once the
@@ -65,7 +68,7 @@ func (noRecorder) ProviderError(kyc.CheckType)                  {}
 func (noRecorder) StatusChanged(kyc.Status, kyc.Status)         {}
 
 // DefaultOptions are the production defaults.
-var DefaultOptions = Options{UploadURLTTL: 15 * time.Minute, ProviderTimeout: 5 * time.Second}
+var DefaultOptions = Options{UploadURLTTL: 15 * time.Minute, ProviderTimeout: 5 * time.Second, EvidenceURLTTL: time.Minute}
 
 // Service exposes the use cases.
 type Service struct {

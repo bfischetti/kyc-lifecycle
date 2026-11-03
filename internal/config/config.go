@@ -20,6 +20,7 @@ type Serve struct {
 	Vault           Vault
 	UploadURLTTL    time.Duration
 	ProviderTimeout time.Duration
+	EvidenceURLTTL  time.Duration
 	Outbox          Outbox
 	// UploadSweepInterval is how often lapsed Upload Intents are expired.
 	UploadSweepInterval time.Duration
@@ -160,6 +161,7 @@ func LoadServe(getenv func(string) string) (Serve, error) {
 		},
 		UploadURLTTL:    r.duration("UPLOAD_URL_TTL", 15*time.Minute),
 		ProviderTimeout: r.duration("PROVIDER_TIMEOUT", 5*time.Second),
+		EvidenceURLTTL:  r.duration("EVIDENCE_URL_TTL", time.Minute),
 		Outbox: Outbox{
 			PollInterval: r.duration("OUTBOX_POLL_INTERVAL", time.Second),
 			MaxAttempts:  r.positiveInt("OUTBOX_MAX_ATTEMPTS", 10),

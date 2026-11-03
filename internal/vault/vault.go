@@ -100,6 +100,29 @@ func (c *Client) PresignUpload(ctx context.Context, key string, d Declared, ttl 
 	return UploadPermission{Method: req.Method, URL: req.URL, Headers: headers, ExpiresAt: now.Add(ttl)}, nil
 }
 
+// DownloadPermission is a short-lived URL that returns one object's bytes.
+type DownloadPermission struct {
+	URL       string
+	ExpiresAt time.Time
+}
+
+// PresignDownload returns a permission to GET the object at key for ttl.
+// The response is served as an attachment named filename, so a browser
+// saves the evidence rather than rendering it inline.
+func (c *Client) PresignDownload(ctx context.Context, key, filename string, ttl time.Duration) (DownloadPermission, error) {
+	now := time.Now()
+	req, err := c.presign.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket:                     aws.String(c.bucket),
+		Key:                        aws.String(key),
+		ResponseContentDisposition: aws.String(fmt.Sprintf("attachment; filename=%q", filename)),
+		ResponseCacheControl:       aws.String("no-store"),
+	}, s3.WithPresignExpires(ttl))
+	if err != nil {
+		return DownloadPermission{}, fmt.Errorf("presign download: %w", err)
+	}
+	return DownloadPermission{URL: req.URL, ExpiresAt: now.Add(ttl)}, nil
+}
+
 // ErrObjectNotFound means nothing is stored under the key.
 var ErrObjectNotFound = errors.New("object not found")
 

@@ -39,6 +39,9 @@ func TestAllowed(t *testing.T) {
 		{Review, co, true},
 		{Review, sa, false},
 		{Review, sy, false},
+		{AccessEvidence, co, true},
+		{AccessEvidence, sa, false},
+		{AccessEvidence, sy, false},
 		{"entity.delete", co, false},
 	}
 	for _, tt := range tests {

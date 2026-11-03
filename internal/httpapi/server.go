@@ -28,6 +28,7 @@ func Handler(svc *app.Service, log *slog.Logger, ready func(*http.Request) error
 	mux.Handle("GET /entities/{id}", auth(http.HandlerFunc(h.getEntity)))
 	mux.Handle("POST /entities/{id}/documents", auth(http.HandlerFunc(h.declareDocument)))
 	mux.Handle("POST /entities/{id}/documents/{docID}/complete", auth(http.HandlerFunc(h.completeUpload)))
+	mux.Handle("GET /entities/{id}/documents/{docID}/content", auth(http.HandlerFunc(h.documentContent)))
 	mux.Handle("GET /entities/{id}/history", auth(http.HandlerFunc(h.history)))
 	mux.Handle("POST /entities/{id}/checks", auth(http.HandlerFunc(h.runCheck)))
 	mux.Handle("POST /entities/{id}/review", auth(http.HandlerFunc(h.review)))

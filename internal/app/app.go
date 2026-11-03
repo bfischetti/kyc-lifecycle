@@ -100,12 +100,23 @@ func (s *Service) CreateEntity(ctx context.Context, actor kyc.Actor, in kyc.NewE
 	return out, err
 }
 
-// GetEntity returns one Entity.
-func (s *Service) GetEntity(ctx context.Context, actor kyc.Actor, id uuid.UUID) (kyc.Entity, error) {
+// EntityView is an Entity with its Documents and Checks, shaped for the
+// caller's role (a Support Agent gets the Redacted View).
+type EntityView struct {
+	Entity    kyc.Entity
+	Documents []kyc.Document
+	Checks    []kyc.Check
+}
+
+// GetEntity returns an Entity with its Documents and Checks. Raw provider
+// payloads are withheld from roles that may not see them, twice over: the
+// policy module strips them here, and row-level security already hides the
+// payload rows from such roles in the database (ADR-0001).
+func (s *Service) GetEntity(ctx context.Context, actor kyc.Actor, id uuid.UUID) (EntityView, error) {
 	if !policy.Allowed(actor.Role, policy.ReadEntity) {
-		return kyc.Entity{}, ErrForbidden
+		return EntityView{}, ErrForbidden
 	}
-	var out kyc.Entity
+	var out EntityView
 	err := s.store.InTx(ctx, actor, func(q *dbgen.Queries) error {
 		row, err := q.GetEntity(ctx, id)
 		if db.IsNoRows(err) {
@@ -114,7 +125,33 @@ func (s *Service) GetEntity(ctx context.Context, actor kyc.Actor, id uuid.UUID) 
 		if err != nil {
 			return fmt.Errorf("get entity: %w", err)
 		}
-		out = entityFromRow(row)
+		out.Entity = entityFromRow(row)
+
+		docs, err := q.ListDocumentsForEntity(ctx, id)
+		if err != nil {
+			return fmt.Errorf("list documents: %w", err)
+		}
+		out.Documents = make([]kyc.Document, len(docs))
+		for i, d := range docs {
+			out.Documents[i] = documentFromRow(d)
+		}
+
+		checks, err := q.ListChecksWithPayloads(ctx, id)
+		if err != nil {
+			return fmt.Errorf("list checks: %w", err)
+		}
+		showRaw := policy.CanSee(actor.Role, policy.CheckRawResponse)
+		out.Checks = make([]kyc.Check, len(checks))
+		for i, c := range checks {
+			var raw []byte
+			if showRaw {
+				raw = c.RawResponse
+			}
+			out.Checks[i] = kyc.Check{
+				ID: c.ID, EntityID: c.EntityID, Type: kyc.CheckType(c.CheckType), Provider: c.Provider,
+				Result: kyc.CheckResult(c.Result), RawResponse: raw, RunBy: c.RunBy, CreatedAt: c.CreatedAt,
+			}
+		}
 		return nil
 	})
 	return out, err

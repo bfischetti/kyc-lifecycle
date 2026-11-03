@@ -57,16 +57,19 @@ func applyTransition(ctx context.Context, q *dbgen.Queries, actor kyc.Actor, loc
 	if err != nil {
 		return locked, fmt.Errorf("update entity status: %w", err)
 	}
-	change, err := q.InsertStatusHistory(ctx, dbgen.InsertStatusHistoryParams{
+	if err := q.InsertStatusHistory(ctx, dbgen.InsertStatusHistoryParams{
 		EntityID:      locked.ID,
 		FromStatus:    dbgen.EntityStatus(from),
 		ToStatus:      dbgen.EntityStatus(to),
 		EntityVersion: updated.Version,
 		Reason:        reason,
 		ChangedBy:     actor.UserID,
-	})
-	if err != nil {
+	}); err != nil {
 		return locked, fmt.Errorf("insert status history: %w", err)
+	}
+	occurredAt, err := q.TransactionTime(ctx) // equals the history row's changed_at
+	if err != nil {
+		return locked, fmt.Errorf("transaction time: %w", err)
 	}
 
 	ev := StatusChangedEvent{
@@ -77,7 +80,7 @@ func applyTransition(ctx context.Context, q *dbgen.Queries, actor kyc.Actor, loc
 		To:            to,
 		Reason:        reason,
 		ChangedBy:     actor.UserID,
-		OccurredAt:    change.ChangedAt,
+		OccurredAt:    occurredAt,
 	}
 	payload, err := json.Marshal(ev)
 	if err != nil {

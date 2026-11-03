@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/bfischetti/kyc-lifecycle/internal/db/dbgen"
 	"github.com/bfischetti/kyc-lifecycle/internal/kyc"
 	"github.com/bfischetti/kyc-lifecycle/internal/policy"
+	"github.com/bfischetti/kyc-lifecycle/internal/vault"
 )
 
 var (
@@ -22,12 +24,30 @@ var (
 	ErrNotFound        = errors.New("not found")
 )
 
+// Vault is the part of the Evidence Vault the use cases need.
+type Vault interface {
+	PresignUpload(ctx context.Context, key string, d vault.Declared, ttl time.Duration) (vault.UploadPermission, error)
+}
+
+// Options tunes use-case behaviour.
+type Options struct {
+	// UploadURLTTL is how long an Upload Intent's permission stays valid.
+	UploadURLTTL time.Duration
+}
+
+// DefaultOptions are the production defaults.
+var DefaultOptions = Options{UploadURLTTL: 15 * time.Minute}
+
 // Service exposes the use cases.
 type Service struct {
 	store *db.Store
+	vault Vault
+	opts  Options
 }
 
-func New(store *db.Store) *Service { return &Service{store: store} }
+func New(store *db.Store, v Vault, opts Options) *Service {
+	return &Service{store: store, vault: v, opts: opts}
+}
 
 // Authenticate resolves a user id to an Actor. The role always comes from the
 // database, never from the caller.

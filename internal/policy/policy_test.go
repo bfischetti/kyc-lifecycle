@@ -24,6 +24,9 @@ func TestAllowed(t *testing.T) {
 		{ReadEntity, sa, true},
 		{ReadEntity, sy, true},
 		{ReadEntity, "auditor", false},
+		{DeclareDocument, co, true},
+		{DeclareDocument, sa, true},
+		{DeclareDocument, sy, false},
 		{"entity.delete", co, false},
 	}
 	for _, tt := range tests {

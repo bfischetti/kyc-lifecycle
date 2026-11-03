@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(m map[string]string) func(string) string {
@@ -10,17 +11,34 @@ func env(m map[string]string) func(string) string {
 }
 
 func TestLoadServe(t *testing.T) {
-	c, err := LoadServe(env(map[string]string{"DATABASE_URL": "postgres://x"}))
+	required := map[string]string{
+		"DATABASE_URL":     "postgres://x",
+		"VAULT_ENDPOINT":   "http://localhost:9000",
+		"VAULT_ACCESS_KEY": "a",
+		"VAULT_SECRET_KEY": "s",
+	}
+	c, err := LoadServe(env(required))
 	if err != nil {
 		t.Fatalf("LoadServe() error = %v", err)
 	}
-	if c.HTTPAddr != ":8080" || c.LogLevel != "info" {
+	if c.HTTPAddr != ":8080" || c.LogLevel != "info" || c.UploadURLTTL != 15*time.Minute ||
+		c.Vault.Bucket != "evidence" || c.Vault.Region != "us-east-1" {
 		t.Errorf("defaults not applied: %+v", c)
 	}
 
 	_, err = LoadServe(env(nil))
-	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
-		t.Errorf("LoadServe(empty) error = %v, want one naming DATABASE_URL", err)
+	for k := range required {
+		if err == nil || !strings.Contains(err.Error(), k) {
+			t.Errorf("LoadServe(empty) error = %v, want one naming %s", err, k)
+		}
+	}
+
+	bad := map[string]string{"UPLOAD_URL_TTL": "soon"}
+	for k, v := range required {
+		bad[k] = v
+	}
+	if _, err := LoadServe(env(bad)); err == nil || !strings.Contains(err.Error(), "UPLOAD_URL_TTL") {
+		t.Errorf("LoadServe(bad ttl) error = %v, want one naming UPLOAD_URL_TTL", err)
 	}
 }
 

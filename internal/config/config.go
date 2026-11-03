@@ -6,13 +6,27 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // Serve is the configuration for `server serve`.
 type Serve struct {
-	DatabaseURL string // runtime connection as the non-owner app role
-	HTTPAddr    string
-	LogLevel    string
+	DatabaseURL  string // runtime connection as the non-owner app role
+	HTTPAddr     string
+	LogLevel     string
+	Vault        Vault
+	UploadURLTTL time.Duration
+}
+
+// Vault locates the Evidence Vault.
+type Vault struct {
+	// Endpoint must be the address clients upload to: presigned URLs are
+	// signed for this host.
+	Endpoint  string
+	Region    string
+	AccessKey string
+	SecretKey string
+	Bucket    string
 }
 
 // Migrate is the configuration for `server migrate`.
@@ -24,6 +38,7 @@ type Migrate struct {
 type reader struct {
 	getenv  func(string) string
 	missing []string
+	invalid []string
 }
 
 func (r *reader) required(key string) string {
@@ -41,7 +56,23 @@ func (r *reader) optional(key, def string) string {
 	return def
 }
 
+func (r *reader) duration(key string, def time.Duration) time.Duration {
+	v := strings.TrimSpace(r.getenv(key))
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		r.invalid = append(r.invalid, key+" (want a positive duration such as 15m)")
+		return def
+	}
+	return d
+}
+
 func (r *reader) err() error {
+	if len(r.invalid) > 0 {
+		return fmt.Errorf("invalid environment variables: %s", strings.Join(r.invalid, ", "))
+	}
 	if len(r.missing) == 0 {
 		return nil
 	}
@@ -55,6 +86,14 @@ func LoadServe(getenv func(string) string) (Serve, error) {
 		DatabaseURL: r.required("DATABASE_URL"),
 		HTTPAddr:    r.optional("HTTP_ADDR", ":8080"),
 		LogLevel:    r.optional("LOG_LEVEL", "info"),
+		Vault: Vault{
+			Endpoint:  r.required("VAULT_ENDPOINT"),
+			Region:    r.optional("VAULT_REGION", "us-east-1"),
+			AccessKey: r.required("VAULT_ACCESS_KEY"),
+			SecretKey: r.required("VAULT_SECRET_KEY"),
+			Bucket:    r.optional("VAULT_BUCKET", "evidence"),
+		},
+		UploadURLTTL: r.duration("UPLOAD_URL_TTL", 15*time.Minute),
 	}
 	return c, r.err()
 }

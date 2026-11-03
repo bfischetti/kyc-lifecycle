@@ -36,10 +36,17 @@ func (s *Service) DeclareDocument(ctx context.Context, actor kyc.Actor, entityID
 
 	var out kyc.Document
 	err = s.store.InTx(ctx, actor, func(q *dbgen.Queries) error {
-		if _, err := q.GetEntity(ctx, entityID); db.IsNoRows(err) {
+		ent, err := q.GetEntity(ctx, entityID)
+		if db.IsNoRows(err) {
 			return ErrNotFound
-		} else if err != nil {
+		}
+		if err != nil {
 			return fmt.Errorf("get entity: %w", err)
+		}
+		// Verified is terminal: no upload could ever complete, so refuse the
+		// intent up front rather than issue a permission that leads nowhere.
+		if _, err := kyc.Transition(kyc.Status(ent.Status), kyc.EventCompletedUpload); err != nil {
+			return fmt.Errorf("%w: entity is %s; no further documents are accepted", ErrConflict, ent.Status)
 		}
 		row, err := q.CreateDocument(ctx, dbgen.CreateDocumentParams{
 			EntityID:        entityID,

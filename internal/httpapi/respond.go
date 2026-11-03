@@ -48,6 +48,13 @@ func writeAppError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err
 		writeError(w, r, log, http.StatusForbidden, "forbidden", "your role may not perform this action", nil)
 	case errors.Is(err, app.ErrNotFound):
 		writeError(w, r, log, http.StatusNotFound, "not_found", "resource not found", nil)
+	// The messages below are composed by the app package for the caller.
+	case errors.Is(err, app.ErrConflict):
+		writeError(w, r, log, http.StatusConflict, "conflict", err.Error(), nil)
+	case errors.Is(err, app.ErrGone):
+		writeError(w, r, log, http.StatusGone, "gone", err.Error(), nil)
+	case errors.Is(err, app.ErrUploadMismatch):
+		writeError(w, r, log, http.StatusUnprocessableEntity, "upload_mismatch", err.Error(), nil)
 	default:
 		writeInternal(w, r, log, err)
 	}

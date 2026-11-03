@@ -22,11 +22,19 @@ var (
 	ErrUnauthenticated = errors.New("unauthenticated")
 	ErrForbidden       = errors.New("forbidden")
 	ErrNotFound        = errors.New("not found")
+	// ErrConflict: the request is valid but not allowed in the current state.
+	ErrConflict = errors.New("conflict")
+	// ErrGone: the resource existed but can no longer be used.
+	ErrGone = errors.New("gone")
+	// ErrUploadMismatch: the vault does not hold the declared bytes.
+	ErrUploadMismatch = errors.New("upload does not match declaration")
 )
 
 // Vault is the part of the Evidence Vault the use cases need.
 type Vault interface {
 	PresignUpload(ctx context.Context, key string, d vault.Declared, ttl time.Duration) (vault.UploadPermission, error)
+	Stat(ctx context.Context, key string) (vault.ObjectInfo, error)
+	ReadPrefix(ctx context.Context, key string, n int) ([]byte, error)
 }
 
 // Options tunes use-case behaviour.

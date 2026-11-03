@@ -58,3 +58,91 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 	)
 	return i, err
 }
+
+const getDocument = `-- name: GetDocument :one
+SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at FROM documents WHERE id = $1 AND entity_id = $2
+`
+
+type GetDocumentParams struct {
+	ID       uuid.UUID
+	EntityID uuid.UUID
+}
+
+func (q *Queries) GetDocument(ctx context.Context, arg GetDocumentParams) (Document, error) {
+	row := q.db.QueryRow(ctx, getDocument, arg.ID, arg.EntityID)
+	var i Document
+	err := row.Scan(
+		&i.ID,
+		&i.EntityID,
+		&i.DocType,
+		&i.ExpiryDate,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.VaultKey,
+		&i.UploadStatus,
+		&i.UploadExpiresAt,
+		&i.UploadedAt,
+		&i.ReviewStatus,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getDocumentForUpdate = `-- name: GetDocumentForUpdate :one
+SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at FROM documents WHERE id = $1 AND entity_id = $2 FOR UPDATE
+`
+
+type GetDocumentForUpdateParams struct {
+	ID       uuid.UUID
+	EntityID uuid.UUID
+}
+
+func (q *Queries) GetDocumentForUpdate(ctx context.Context, arg GetDocumentForUpdateParams) (Document, error) {
+	row := q.db.QueryRow(ctx, getDocumentForUpdate, arg.ID, arg.EntityID)
+	var i Document
+	err := row.Scan(
+		&i.ID,
+		&i.EntityID,
+		&i.DocType,
+		&i.ExpiryDate,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.VaultKey,
+		&i.UploadStatus,
+		&i.UploadExpiresAt,
+		&i.UploadedAt,
+		&i.ReviewStatus,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const markDocumentUploaded = `-- name: MarkDocumentUploaded :one
+UPDATE documents
+SET upload_status = 'uploaded', uploaded_at = now()
+WHERE id = $1 AND upload_status = 'awaiting_upload'
+RETURNING id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at
+`
+
+func (q *Queries) MarkDocumentUploaded(ctx context.Context, id uuid.UUID) (Document, error) {
+	row := q.db.QueryRow(ctx, markDocumentUploaded, id)
+	var i Document
+	err := row.Scan(
+		&i.ID,
+		&i.EntityID,
+		&i.DocType,
+		&i.ExpiryDate,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
+		&i.VaultKey,
+		&i.UploadStatus,
+		&i.UploadExpiresAt,
+		&i.UploadedAt,
+		&i.ReviewStatus,
+		&i.CreatedAt,
+	)
+	return i, err
+}

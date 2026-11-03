@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -96,4 +98,55 @@ func (c *Client) PresignUpload(ctx context.Context, key string, d Declared, ttl 
 		headers[http.CanonicalHeaderKey(k)] = strings.Join(v, ",")
 	}
 	return UploadPermission{Method: req.Method, URL: req.URL, Headers: headers, ExpiresAt: now.Add(ttl)}, nil
+}
+
+// ErrObjectNotFound means nothing is stored under the key.
+var ErrObjectNotFound = errors.New("object not found")
+
+// ObjectInfo is what the vault reports about a stored object.
+type ObjectInfo struct {
+	SizeBytes   int64
+	SHA256Hex   string // empty if the store holds no SHA-256 for it
+	ContentType string
+}
+
+// Stat describes the object at key, or returns ErrObjectNotFound.
+func (c *Client) Stat(ctx context.Context, key string) (ObjectInfo, error) {
+	out, err := c.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket:       aws.String(c.bucket),
+		Key:          aws.String(key),
+		ChecksumMode: types.ChecksumModeEnabled,
+	})
+	var nf *types.NotFound
+	if errors.As(err, &nf) {
+		return ObjectInfo{}, ErrObjectNotFound
+	}
+	if err != nil {
+		return ObjectInfo{}, fmt.Errorf("head object: %w", err)
+	}
+	info := ObjectInfo{SizeBytes: aws.ToInt64(out.ContentLength), ContentType: aws.ToString(out.ContentType)}
+	if b64 := aws.ToString(out.ChecksumSHA256); b64 != "" {
+		if sum, err := base64.StdEncoding.DecodeString(b64); err == nil {
+			info.SHA256Hex = hex.EncodeToString(sum)
+		}
+	}
+	return info, nil
+}
+
+// ReadPrefix returns up to n leading bytes of the object at key.
+func (c *Client) ReadPrefix(ctx context.Context, key string, n int) ([]byte, error) {
+	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+		Range:  aws.String(fmt.Sprintf("bytes=0-%d", n-1)),
+	})
+	var nk *types.NoSuchKey
+	if errors.As(err, &nk) {
+		return nil, ErrObjectNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get object: %w", err)
+	}
+	defer func() { _ = out.Body.Close() }()
+	return io.ReadAll(io.LimitReader(out.Body, int64(n)))
 }

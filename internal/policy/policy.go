@@ -12,6 +12,8 @@ const (
 	CreateEntity    Action = "entity.create"
 	ReadEntity      Action = "entity.read"
 	DeclareDocument Action = "document.declare"
+	CompleteUpload  Action = "document.complete"
+	ReadHistory     Action = "entity.history"
 )
 
 var grants = map[Action]map[kyc.Role]bool{
@@ -19,6 +21,9 @@ var grants = map[Action]map[kyc.Role]bool{
 	ReadEntity:   {kyc.RoleComplianceOfficer: true, kyc.RoleSupportAgent: true, kyc.RoleSystem: true},
 	// Support agents onboard Entities, so they attach Documents too.
 	DeclareDocument: {kyc.RoleComplianceOfficer: true, kyc.RoleSupportAgent: true},
+	CompleteUpload:  {kyc.RoleComplianceOfficer: true, kyc.RoleSupportAgent: true},
+	// The audit trail is for compliance only.
+	ReadHistory: {kyc.RoleComplianceOfficer: true},
 }
 
 // Allowed reports whether role may perform action. Unknown actions and roles

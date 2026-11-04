@@ -1,0 +1,53 @@
+{{define "content"}}
+<div class="head">
+  <div>
+    <h1>Entities</h1>
+    <div class="sub">{{if .Data.Queue}}Oldest first, so the longest wait is at the top.{{else}}Most recently updated first.{{end}} · <a href="{{.Data.HereURL}}">Refresh</a></div>
+  </div>
+</div>
+<form class="filters" method="get" action="/ui/entities">
+  <div>
+    <label for="status">Verification Status</label>
+    <select id="status" name="status">
+      <option value="">All</option>
+      {{range .Data.Statuses}}<option value="{{.}}"{{if eq . $.Data.Filter.Status}} selected{{end}}>{{statusName .}}</option>
+      {{end}}
+    </select>
+  </div>
+  <div>
+    <label for="type">Entity type</label>
+    <select id="type" name="type">
+      <option value="">All</option>
+      {{range .Data.Types}}<option value="{{.}}"{{if eq . $.Data.Filter.Type}} selected{{end}}>{{typeName .}}</option>
+      {{end}}
+    </select>
+  </div>
+  <button type="submit">Apply</button>
+</form>
+<section class="card list">
+  {{if .Data.Entities}}
+  <table>
+    <thead><tr><th>Legal name</th><th>Type</th><th>Country</th><th>Status</th><th>Last updated</th></tr></thead>
+    <tbody>
+    {{range .Data.Entities}}
+      <tr>
+        <td><a href="/ui/entities/{{.ID}}">{{.LegalName}}</a></td>
+        <td>{{typeName .Type}}</td>
+        <td>{{.Country}}</td>
+        <td><span class="badge badge-{{.Status}}">{{statusName .Status}}</span></td>
+        <td class="muted" title="{{timestamp .UpdatedAt}}">{{ago .UpdatedAt}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="empty">{{if .Data.Paged}}No more Entities match these filters.{{else}}No Entities match these filters.{{end}}</p>
+  {{end}}
+  {{if or .Data.Paged .Data.NextURL}}
+  <div class="foot">
+    <span>50 per page</span>
+    <span>{{if .Data.Paged}}<a href="{{.Data.FirstURL}}">First page</a>{{end}}{{if .Data.NextURL}}<a href="{{.Data.NextURL}}">Next page</a>{{end}}</span>
+  </div>
+  {{end}}
+</section>
+{{end}}

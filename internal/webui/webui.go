@@ -12,7 +12,9 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,6 +47,7 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 var funcs = template.FuncMap{
+	"ago":        func(t time.Time) string { return ago(time.Since(t)) },
 	"roleName":   roleName,
 	"statusName": statusName,
 	"typeName":   typeName,
@@ -55,7 +58,7 @@ var funcs = template.FuncMap{
 // than on the first visit to that page.
 var pages = func() map[string]*template.Template {
 	out := map[string]*template.Template{}
-	for _, name := range []string{"sign_in", "new_entity", "entity", "message"} {
+	for _, name := range []string{"sign_in", "entities", "new_entity", "entity", "message"} {
 		out[name] = template.Must(template.New("layout").Funcs(funcs).ParseFS(templateFS, "templates/layout.html", "templates/"+name+".html"))
 	}
 	return out
@@ -74,8 +77,9 @@ func Handler(svc *app.Service, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /ui/sign-in", u.signInPage)
 	mux.HandleFunc("POST /ui/sign-in", u.signIn)
 	mux.Handle("GET /ui/{$}", u.authed(func(w http.ResponseWriter, r *http.Request, _ kyc.Actor) {
-		http.Redirect(w, r, "/ui/entities/new", http.StatusSeeOther)
+		http.Redirect(w, r, "/ui/entities", http.StatusSeeOther)
 	}))
+	mux.Handle("GET /ui/entities", u.authed(u.entities))
 	mux.Handle("GET /ui/entities/new", u.authed(u.newEntity))
 	mux.Handle("POST /ui/entities", u.authed(u.createEntity))
 	mux.Handle("GET /ui/entities/{id}", u.authed(u.entity))
@@ -198,6 +202,90 @@ func (u *ui) signIn(w http.ResponseWriter, r *http.Request) {
 	}
 	setIdentity(w, id.String(), 0)
 	http.Redirect(w, r, "/ui/", http.StatusSeeOther)
+}
+
+// The entity types a list can be filtered by.
+var entityTypes = []kyc.EntityType{kyc.EntityTypeIndividual, kyc.EntityTypeBusiness}
+
+type entitiesPage struct {
+	Filter   app.EntityFilter
+	Statuses []kyc.Status
+	Types    []kyc.EntityType
+	Entities []kyc.Entity
+	Queue    bool   // pending review, which reads oldest first
+	Paged    bool   // past the first page
+	FirstURL string // this filter's first page
+	HereURL  string // this page, to refresh it
+	NextURL  string
+}
+
+func (u *ui) entities(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
+	q := r.URL.Query()
+	filter := app.EntityFilter{Status: kyc.Status(q.Get("status")), Type: kyc.EntityType(q.Get("type"))}
+	// No status parameter is a first visit, which starts from the role's usual
+	// view. An empty one is a person choosing "All".
+	if !q.Has("status") && a.Role == kyc.RoleComplianceOfficer {
+		filter.Status = kyc.StatusPendingReview
+	}
+	if after := q.Get("after"); after != "" {
+		cursor, err := app.ParseEntityCursor(after)
+		if err != nil {
+			u.message(w, r, http.StatusBadRequest, &a, "Couldn't open that page", "The link to this page of the list isn't valid. Go back to Entities and try again.")
+			return
+		}
+		filter.After = &cursor
+	}
+
+	page, err := u.svc.ListEntities(r.Context(), a, filter)
+	if _, invalid := kyc.AsValidationError(err); invalid {
+		u.message(w, r, http.StatusBadRequest, &a, "Unknown filter", "That Verification Status or entity type doesn't exist. Go back to Entities and choose from the filters.")
+		return
+	}
+	if err != nil {
+		u.internal(w, r, &a, err)
+		return
+	}
+
+	data := entitiesPage{
+		Filter: filter, Statuses: kyc.Statuses, Types: entityTypes, Entities: page.Entities,
+		Queue: filter.Status == kyc.StatusPendingReview, Paged: filter.After != nil,
+		FirstURL: entitiesURL(filter, nil), HereURL: r.URL.RequestURI(),
+	}
+	if page.Next != nil {
+		data.NextURL = entitiesURL(filter, page.Next)
+	}
+	u.render(w, r, http.StatusOK, "entities", view{Title: "Entities", Actor: &a, Data: data})
+}
+
+// entitiesURL always carries status, even empty, so "All" outlives paging.
+func entitiesURL(f app.EntityFilter, after *app.EntityCursor) string {
+	q := url.Values{"status": {string(f.Status)}}
+	if f.Type != "" {
+		q.Set("type", string(f.Type))
+	}
+	if after != nil {
+		q.Set("after", after.String())
+	}
+	return "/ui/entities?" + q.Encode()
+}
+
+// ago is a duration as a person would say it.
+func ago(d time.Duration) string {
+	plural := func(n int, unit string) string {
+		if n == 1 {
+			return "1 " + unit + " ago"
+		}
+		return strconv.Itoa(n) + " " + unit + "s ago"
+	}
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return plural(int(d.Minutes()), "minute")
+	case d < 24*time.Hour:
+		return plural(int(d.Hours()), "hour")
+	}
+	return plural(int(d.Hours())/24, "day")
 }
 
 type entityForm struct {

@@ -9,7 +9,7 @@
 <body>
 <header class="top">
   <a class="brand" href="/ui/">KYC Lifecycle</a>
-  <nav>{{if .Actor}}<a href="/ui/entities/new">New Entity</a>{{end}}</nav>
+  <nav>{{if .Actor}}<a href="/ui/entities">Entities</a><a href="/ui/entities/new">New Entity</a>{{end}}</nav>
   {{if .Actor}}<span class="who">Signed in as <strong>{{roleName .Actor.Role}}</strong> · <a href="/ui/sign-in">Switch</a></span>{{end}}
 </header>
 <div class="demo">Demo identity: there is no real authentication.</div>

@@ -7,8 +7,10 @@ package dbgen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createEntity = `-- name: CreateEntity :one
@@ -77,6 +79,112 @@ func (q *Queries) GetEntityForUpdate(ctx context.Context, id uuid.UUID) (Entity,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listEntitiesNewestFirst = `-- name: ListEntitiesNewestFirst :many
+SELECT id, type, legal_name, country, status, version, created_at, updated_at FROM entities
+WHERE ($2::entity_status IS NULL OR status = $2)
+  AND ($3::entity_type IS NULL OR type = $3)
+  AND ($4::timestamptz IS NULL
+       OR (updated_at, id) < ($4, $5::uuid))
+ORDER BY updated_at DESC, id DESC
+LIMIT $1
+`
+
+type ListEntitiesNewestFirstParams struct {
+	Limit          int32
+	Status         NullEntityStatus
+	Type           NullEntityType
+	AfterUpdatedAt *time.Time
+	AfterID        pgtype.UUID
+}
+
+func (q *Queries) ListEntitiesNewestFirst(ctx context.Context, arg ListEntitiesNewestFirstParams) ([]Entity, error) {
+	rows, err := q.db.Query(ctx, listEntitiesNewestFirst,
+		arg.Limit,
+		arg.Status,
+		arg.Type,
+		arg.AfterUpdatedAt,
+		arg.AfterID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Entity
+	for rows.Next() {
+		var i Entity
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.LegalName,
+			&i.Country,
+			&i.Status,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEntitiesOldestFirst = `-- name: ListEntitiesOldestFirst :many
+SELECT id, type, legal_name, country, status, version, created_at, updated_at FROM entities
+WHERE ($2::entity_status IS NULL OR status = $2)
+  AND ($3::entity_type IS NULL OR type = $3)
+  AND ($4::timestamptz IS NULL
+       OR (updated_at, id) > ($4, $5::uuid))
+ORDER BY updated_at, id
+LIMIT $1
+`
+
+type ListEntitiesOldestFirstParams struct {
+	Limit          int32
+	Status         NullEntityStatus
+	Type           NullEntityType
+	AfterUpdatedAt *time.Time
+	AfterID        pgtype.UUID
+}
+
+func (q *Queries) ListEntitiesOldestFirst(ctx context.Context, arg ListEntitiesOldestFirstParams) ([]Entity, error) {
+	rows, err := q.db.Query(ctx, listEntitiesOldestFirst,
+		arg.Limit,
+		arg.Status,
+		arg.Type,
+		arg.AfterUpdatedAt,
+		arg.AfterID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Entity
+	for rows.Next() {
+		var i Entity
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.LegalName,
+			&i.Country,
+			&i.Status,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateEntityStatus = `-- name: UpdateEntityStatus :one

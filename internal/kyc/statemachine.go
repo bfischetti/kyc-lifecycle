@@ -3,6 +3,7 @@ package kyc
 import (
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // Event is something that can change an Entity's Verification Status.
@@ -24,6 +25,9 @@ var (
 	Statuses = []Status{StatusUnverified, StatusPendingReview, StatusVerified, StatusRejected}
 	Events   = []Event{EventCompletedUpload, EventApprove, EventReject, EventHardFail}
 )
+
+// Valid reports whether s is a known Verification Status.
+func (s Status) Valid() bool { return slices.Contains(Statuses, s) }
 
 // ErrInvalidTransition means the event is not allowed in the current status.
 var ErrInvalidTransition = errors.New("invalid status transition")

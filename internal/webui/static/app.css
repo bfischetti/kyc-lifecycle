@@ -16,6 +16,7 @@ h2 { font-size: 14px; margin: 0; font-weight: 600; }
 .top { background: var(--surface); border-bottom: 1px solid var(--line); padding: 0 var(--s5); height: 52px; display: flex; align-items: center; gap: var(--s5); }
 .brand { font-weight: 600; color: var(--ink); }
 .top nav { flex: 1; }
+.top nav { display: flex; gap: var(--s4); }
 .top nav a { color: var(--ink); font-weight: 500; }
 .who { color: var(--muted); }
 .who strong { color: var(--ink); font-weight: 500; }
@@ -51,3 +52,16 @@ input[type="text"], select { width: 100%; font: inherit; padding: 6px 8px; borde
 .choice + .choice { border-top: 1px solid var(--line); margin-top: var(--s3); padding-top: var(--s3); }
 .choice strong { font-weight: 600; }
 .choice p { margin: 0; }
+
+.filters { display: flex; align-items: flex-end; gap: var(--s3); margin-bottom: var(--s4); }
+.filters label { font-size: 12px; color: var(--muted); }
+.filters select { width: auto; min-width: 160px; }
+.list { padding: 0; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th { font-size: 12px; font-weight: 500; color: var(--muted); text-align: left; padding: var(--s2) var(--s4); border-bottom: 1px solid var(--line); }
+td { padding: 10px var(--s4); border-bottom: 1px solid var(--line); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+.muted { color: var(--muted); }
+.card .empty { margin: 0; padding: var(--s5) var(--s4); text-align: center; }
+.foot { display: flex; justify-content: space-between; gap: var(--s4); padding: var(--s2) var(--s4); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.foot a + a { margin-left: var(--s3); }

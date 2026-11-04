@@ -11,6 +11,7 @@ type Action string
 const (
 	CreateEntity    Action = "entity.create"
 	ReadEntity      Action = "entity.read"
+	ListEntities    Action = "entity.list"
 	DeclareDocument Action = "document.declare"
 	CompleteUpload  Action = "document.complete"
 	ReadHistory     Action = "entity.history"
@@ -22,6 +23,8 @@ const (
 var grants = map[Action]map[kyc.Role]bool{
 	CreateEntity: {kyc.RoleComplianceOfficer: true, kyc.RoleSupportAgent: true},
 	ReadEntity:   {kyc.RoleComplianceOfficer: true, kyc.RoleSupportAgent: true, kyc.RoleSystem: true},
+	// Finding Entities is for people; automation always knows the id it works on.
+	ListEntities: {kyc.RoleComplianceOfficer: true, kyc.RoleSupportAgent: true},
 	// Support agents onboard Entities, so they attach Documents too.
 	DeclareDocument: {kyc.RoleComplianceOfficer: true, kyc.RoleSupportAgent: true},
 	CompleteUpload:  {kyc.RoleComplianceOfficer: true, kyc.RoleSupportAgent: true},

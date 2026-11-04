@@ -205,7 +205,7 @@ Either all of it happens or none does ([`internal/app/transition.go`](internal/a
 - **Failures retry with exponential backoff.** After 10 attempts a notification is dead-lettered, kept and visible rather than dropped ([`TestDelivery`](internal/outbox/worker_integration_test.go)). The `kyc_notifications{state="dead"}` gauge exposes the count.
 - **Webhooks are signed** using the [Standard Webhooks](https://www.standardwebhooks.com) scheme: HMAC-SHA256 over id, timestamp and body. Receivers can reject forged, tampered or replayed deliveries ([`TestWebhookDelivery`](internal/outbox/webhook_integration_test.go), [`cmd/webhook-sink`](cmd/webhook-sink/main_test.go)).
 
-Notifications contain identifiers and the transition only, never document contents or provider payloads.
+Notifications contain identifiers and the transition only, never document contents, provider payloads or written decision reasons.
 
 ### Concurrency and retries
 

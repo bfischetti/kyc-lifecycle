@@ -105,7 +105,6 @@ type notification struct {
 		EntityVersion int    `json:"entity_version"`
 		From          string `json:"from"`
 		To            string `json:"to"`
-		Reason        string `json:"reason"`
 		ChangedBy     string `json:"changed_by"`
 		OccurredAt    string `json:"occurred_at"`
 	} `json:"data"`
@@ -145,7 +144,6 @@ func (s *sink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Int("entity_version", n.Data.EntityVersion),
 		slog.String("from", n.Data.From),
 		slog.String("to", n.Data.To),
-		slog.String("reason", n.Data.Reason),
 	)
 	w.WriteHeader(http.StatusNoContent)
 }

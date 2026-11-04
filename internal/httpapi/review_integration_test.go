@@ -3,8 +3,10 @@
 package httpapi_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -143,6 +145,32 @@ func TestReview(t *testing.T) {
 		}
 		if s := e.queryString(t, "SELECT string_agg(DISTINCT review_status::text, ',') FROM documents WHERE entity_id = $1", id); s != "rejected" {
 			t.Errorf("document review statuses = %s, want rejected", s)
+		}
+	})
+
+	t.Run("a rejection's notification omits the written reason, which stays in the audit trail", func(t *testing.T) {
+		const reason = "possible link to a sanctioned party"
+		id := e.pendingEntity(t, "individual", "Ada Lovelace")
+		version := e.version(t, id)
+		if resp, _ := e.review(t, complianceOfficer, id, "reject", reason, version); resp.StatusCode != http.StatusOK {
+			t.Fatalf("status %d, want 200 (%s)", resp.StatusCode, resp.Raw)
+		}
+
+		payload := e.queryString(t, "SELECT payload::text FROM outbox WHERE entity_id = $1 AND payload->>'to' = 'rejected'", id)
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := ev["reason"]; ok || strings.Contains(payload, reason) {
+			t.Errorf("notification carries the reason: %s", payload)
+		}
+		if ev["entity_id"] != id || ev["entity_version"] != float64(version+1) || ev["from"] != "pending_review" ||
+			ev["to"] != "rejected" || ev["changed_by"] != complianceOfficer || ev["event_id"] == nil || ev["occurred_at"] == nil {
+			t.Errorf("notification = %v", ev)
+		}
+
+		if got := e.queryString(t, "SELECT reason FROM status_history WHERE entity_id = $1 AND to_status = 'rejected'", id); got != reason {
+			t.Errorf("audit trail reason = %q, want %q", got, reason)
 		}
 	})
 

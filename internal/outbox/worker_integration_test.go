@@ -67,7 +67,7 @@ func (h *harness) enqueue(t *testing.T, n int) []uuid.UUID {
 		ids[i] = uuid.New()
 		payload, _ := json.Marshal(map[string]any{
 			"event_id": ids[i], "entity_id": entityID, "entity_version": i + 1,
-			"from": "unverified", "to": "pending_review", "reason": "document uploaded",
+			"from": "unverified", "to": "pending_review",
 			"changed_by": "00000000-0000-0000-0000-000000000002", "occurred_at": time.Now(),
 		})
 		if _, err := h.admin.Exec(ctx,
@@ -192,7 +192,7 @@ func TestDelivery(t *testing.T) {
 			t.Errorf("message = %s %v", calls[0].msg.Type, ev)
 		}
 		allowed := map[string]bool{"event_id": true, "entity_id": true, "entity_version": true, "from": true,
-			"to": true, "reason": true, "changed_by": true, "occurred_at": true}
+			"to": true, "changed_by": true, "occurred_at": true}
 		for k := range ev {
 			if !allowed[k] {
 				t.Errorf("published notification has unexpected field %q", k)

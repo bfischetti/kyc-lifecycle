@@ -17,7 +17,8 @@ import (
 const EventTypeStatusChanged = "entity.status_changed"
 
 // StatusChangedEvent is the Status Change Notification payload: identifiers
-// and the transition only, never Document contents or provider payloads.
+// and the transition only, never Document contents, provider payloads or the
+// written reason, which stays in the Audit Trail.
 // Consumers de-duplicate on EventID and order on EntityVersion.
 type StatusChangedEvent struct {
 	EventID       uuid.UUID  `json:"event_id"`
@@ -25,7 +26,6 @@ type StatusChangedEvent struct {
 	EntityVersion int        `json:"entity_version"`
 	From          kyc.Status `json:"from"`
 	To            kyc.Status `json:"to"`
-	Reason        string     `json:"reason"`
 	ChangedBy     uuid.UUID  `json:"changed_by"`
 	OccurredAt    time.Time  `json:"occurred_at"`
 }
@@ -78,7 +78,6 @@ func applyTransition(ctx context.Context, q *dbgen.Queries, actor kyc.Actor, loc
 		EntityVersion: int(updated.Version),
 		From:          from,
 		To:            to,
-		Reason:        reason,
 		ChangedBy:     actor.UserID,
 		OccurredAt:    occurredAt,
 	}

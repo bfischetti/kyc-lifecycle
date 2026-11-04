@@ -110,6 +110,9 @@ func TestAuditTrailOlderRowsAreNotRecorded(t *testing.T) {
 	id := e.seedInReview(t, "older", kyc.EntityTypeIndividual)
 	e.exec(t, `UPDATE entities SET created_at = now() - interval '2 hours' WHERE id = $1`, id)
 	e.seedDocument(t, id, kyc.DocPassport, nil, time.Now())
+	// The upload time above comes from this machine's clock and the declaration
+	// from the database's, which can differ. Keep them well apart.
+	e.exec(t, `UPDATE documents SET created_at = now() - interval '30 minutes' WHERE entity_id = $1`, id)
 
 	trail, err := e.svc.AuditTrail(t.Context(), officer, id)
 	if err != nil {

@@ -11,13 +11,13 @@ The merchant (business) or person (individual) being verified. Has exactly one *
 _Avoid_: Customer, merchant, account, subject
 
 **Verification Status**:
-Where an **Entity** stands: unverified (nothing submitted), pending review (a **Review Cycle** is open), verified (approved; terminal), or rejected (may be resubmitted). Every change is recorded in the audit trail.
+Where an **Entity** stands: unverified (nothing submitted), pending review (a **Review Cycle** is open), verified (approved; terminal), or rejected (may be resubmitted). Every change is recorded in the **Audit Trail**.
 _Avoid_: State, KYC status
 
 ### Actors
 
 **Compliance Officer**:
-A person who screens **Entities**, makes **Compliance Approvals** and **Compliance Rejections**, and reads the audit trail. Sees everything.
+A person who screens **Entities**, makes **Compliance Approvals** and **Compliance Rejections**, and reads the **Audit Trail**. Sees everything.
 
 **Support Agent**:
 A person who onboards **Entities** and attaches **Documents**. Cannot screen or decide, and only sees the **Redacted View**.
@@ -27,7 +27,7 @@ _Avoid_: Operator, admin
 The non-human actor behind automated work: running **Checks**, **System Rejections**, and downstream notification. Every automated status change is attributed to it.
 
 **Redacted View**:
-An **Entity** with its **Documents** and **Checks** as a **Support Agent** sees it: **Evidence Vault** keys, document contents, and raw provider payloads are withheld.
+An **Entity** with its **Documents** and **Checks** as a **Support Agent** sees it: **Evidence Vault** keys, document contents, raw provider payloads, and the written reasons for decisions are withheld.
 
 ### Evidence
 
@@ -109,6 +109,12 @@ A rejection caused by a **Hard Fail**, attributed to the system rather than a pe
 
 **Stale Decision**:
 A **Compliance Approval** or **Compliance Rejection** made against an **Entity Version** that is no longer current. Always refused; the officer must look again.
+
+### Audit
+
+**Audit Trail**:
+The chronological record of what happened to one **Entity**: its creation, status changes, **Checks**, **Document** events and **Evidence Accesses**, each attributed to an actor and a time. Only a **Compliance Officer** reads it. Refused attempts and **Provider Errors** are not part of it.
+_Avoid_: History, log, status history (that is only one part of it)
 
 ### Notification
 

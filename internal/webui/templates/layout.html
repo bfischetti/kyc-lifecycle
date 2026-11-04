@@ -1,0 +1,19 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · KYC Lifecycle</title>
+<link rel="stylesheet" href="/ui/static/app.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/ui/">KYC Lifecycle</a>
+  <nav>{{if .Actor}}<a href="/ui/entities/new">New Entity</a>{{end}}</nav>
+  {{if .Actor}}<span class="who">Signed in as <strong>{{roleName .Actor.Role}}</strong> · <a href="/ui/sign-in">Switch</a></span>{{end}}
+</header>
+<div class="demo">Demo identity: there is no real authentication.</div>
+<main class="wrap">{{template "content" .}}</main>
+</body>
+</html>
+{{end}}

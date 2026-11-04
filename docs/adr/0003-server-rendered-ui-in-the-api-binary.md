@@ -14,5 +14,5 @@ The back-office UI for **Support Agents** and **Compliance Officers** is server-
 
 - Using the UI does not exercise the JSON handlers. Integration tests remain responsible for the API contract, and both front doors map service errors such as Stale Decisions and unmet approval requirements on their own.
 - Identity is an unsigned "sign in as" cookie holding a seeded person's user id. It is exactly as trustworthy as the `X-User-ID` header: a demo stand-in, not authentication. The System user can't sign in.
-- Cookies bring CSRF, which the header didn't have. The cookie is `SameSite=Strict` and every action is a POST, including opening evidence, so a GET can never add to the Audit Trail.
+- Cookies bring CSRF, which the header didn't have. The cookie is `SameSite=Strict` and every action is a POST, including opening evidence, so a GET can never add to the Audit Trail. Signing in needs no cookie, so the UI also refuses cross-origin POSTs outright.
 - Evidence Access keeps ADR-0001's order: a POST records the access, then answers with a 303 redirect to the short-lived URL.

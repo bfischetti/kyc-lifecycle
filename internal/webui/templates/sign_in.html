@@ -1,0 +1,17 @@
+{{define "content"}}
+<div class="narrow">
+<div class="head"><h1>Sign in as</h1></div>
+<section class="card">
+  <form class="choice" method="post" action="/ui/sign-in">
+    <div><strong>Support Agent</strong><p>Onboards Entities and attaches Documents.</p></div>
+    <input type="hidden" name="role" value="support_agent">
+    <button class="primary">Sign in</button>
+  </form>
+  <form class="choice" method="post" action="/ui/sign-in">
+    <div><strong>Compliance Officer</strong><p>Screens Entities and makes decisions.</p></div>
+    <input type="hidden" name="role" value="compliance_officer">
+    <button class="primary">Sign in</button>
+  </form>
+</section>
+</div>
+{{end}}

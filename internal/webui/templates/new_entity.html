@@ -1,0 +1,28 @@
+{{define "content"}}
+<div class="narrow">
+<div class="head"><h1>New Entity</h1></div>
+<form class="card" method="post" action="/ui/entities">
+  <input type="hidden" name="idempotency_key" value="{{.Data.IdempotencyKey}}">
+  <div class="field{{if .Data.Errors.type}} invalid{{end}}">
+    <label for="type">Type</label>
+    <select id="type" name="type">
+      <option value="individual"{{if eq .Data.Type "individual"}} selected{{end}}>Individual</option>
+      <option value="business"{{if eq .Data.Type "business"}} selected{{end}}>Business</option>
+    </select>
+    {{with .Data.Errors.type}}<div class="field-error">{{.}}</div>{{end}}
+  </div>
+  <div class="field{{if .Data.Errors.legal_name}} invalid{{end}}">
+    <label for="legal_name">Legal name</label>
+    <input type="text" id="legal_name" name="legal_name" value="{{.Data.LegalName}}">
+    {{with .Data.Errors.legal_name}}<div class="field-error">{{.}}</div>{{end}}
+  </div>
+  <div class="field{{if .Data.Errors.country}} invalid{{end}}">
+    <label for="country">Country</label>
+    <input type="text" id="country" name="country" value="{{.Data.Country}}" maxlength="2" autocapitalize="characters">
+    <div class="hint">Two-letter ISO code, for example GB.</div>
+    {{with .Data.Errors.country}}<div class="field-error">{{.}}</div>{{end}}
+  </div>
+  <button class="primary">Create Entity</button>
+</form>
+</div>
+{{end}}

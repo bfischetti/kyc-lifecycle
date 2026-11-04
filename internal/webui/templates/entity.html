@@ -1,0 +1,15 @@
+{{define "content"}}
+{{with .Data.Entity}}
+<div class="head">
+  <div>
+    <h1>{{.LegalName}}</h1>
+    <div class="sub">{{typeName .Type}} · {{.Country}} · Version {{.Version}} · Updated {{timestamp .UpdatedAt}} · <a href="/ui/entities/{{.ID}}">Refresh</a></div>
+  </div>
+  <span class="badge badge-{{.Status}}">{{statusName .Status}}</span>
+</div>
+{{end}}
+<section class="card">
+  <h2>{{.Data.NextTitle}}</h2>
+  <p>{{.Data.NextDetail}}</p>
+</section>
+{{end}}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/bfischetti/kyc-lifecycle/internal/app"
 	"github.com/bfischetti/kyc-lifecycle/internal/metrics"
+	"github.com/bfischetti/kyc-lifecycle/internal/webui"
 )
 
 // Handler builds the service's HTTP handler. With m nil there is no
@@ -35,6 +36,7 @@ func Handler(svc *app.Service, log *slog.Logger, ready func(*http.Request) error
 	mux.Handle("GET /entities/{id}/history", auth(http.HandlerFunc(h.history)))
 	mux.Handle("POST /entities/{id}/checks", auth(idem(http.HandlerFunc(h.runCheck))))
 	mux.Handle("POST /entities/{id}/review", auth(http.HandlerFunc(h.review)))
+	mux.Handle("/ui/", webui.Handler(svc, log))
 	if m == nil {
 		return requestID(accessLog(log, recoverPanics(log, mux)))
 	}

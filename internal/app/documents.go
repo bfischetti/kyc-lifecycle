@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bfischetti/kyc-lifecycle/internal/db"
 	"github.com/bfischetti/kyc-lifecycle/internal/db/dbgen"
@@ -57,6 +58,7 @@ func (s *Service) DeclareDocument(ctx context.Context, actor kyc.Actor, entityID
 			Sha256:          in.SHA256,
 			VaultKey:        key,
 			UploadExpiresAt: perm.ExpiresAt,
+			DeclaredBy:      pgtype.UUID{Bytes: actor.UserID, Valid: true},
 		})
 		if err != nil {
 			return fmt.Errorf("insert document: %w", err)

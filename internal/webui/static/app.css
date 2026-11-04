@@ -105,3 +105,13 @@ textarea { width: 100%; font: inherit; padding: var(--s2); border: 1px solid #c3
 .actions { display: flex; gap: var(--s2); }
 button.danger { color: var(--bad); border-color: #e3b6b4; }
 button.danger:hover { background: var(--bad-bg); }
+
+.act form { display: inline; }
+.trail { list-style: none; margin: 0; padding: 0; }
+.trail li { display: grid; grid-template-columns: 170px 1fr auto; gap: var(--s3); padding: 10px var(--s4); border-bottom: 1px solid var(--line); }
+.trail li:last-child { border-bottom: 0; }
+.trail time, .trail .by { color: var(--muted); font-size: 12px; padding-top: 1px; }
+.trail .by { text-align: right; }
+.trail em { display: block; font-style: normal; color: var(--muted); margin-top: 2px; }
+.kind { display: block; color: var(--muted); font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }
+@media (max-width: 720px) { .trail li { grid-template-columns: 1fr; } .trail .by { text-align: left; } }

@@ -74,7 +74,7 @@
   {{if .Data.Resubmitted}}<p class="note">Resubmission: a new Review Cycle is open. Documents marked Rejected belong to an earlier cycle and don't count toward approval.</p>{{end}}
   {{if .Data.Documents}}
   <table>
-    <thead><tr><th>Type</th><th>Upload</th><th>Review</th><th>Expiry</th><th>Declared</th>{{if .Data.CanUpload}}<th></th>{{end}}</tr></thead>
+    <thead><tr><th>Type</th><th>Upload</th><th>Review</th><th>Expiry</th><th>Declared</th>{{if or .Data.CanUpload .Data.CanOpen}}<th></th>{{end}}</tr></thead>
     <tbody>
     {{range .Data.Documents}}
       <tr>
@@ -84,6 +84,7 @@
         <td>{{if .ExpiryDate}}{{date .ExpiryDate}}{{else}}<span class="muted">None</span>{{end}}</td>
         <td class="muted">{{timestamp .CreatedAt}}</td>
         {{if $.Data.CanUpload}}<td class="act">{{if eq .UploadStatus "awaiting_upload"}}<button type="button" data-complete-url="/ui/entities/{{.EntityID}}/documents/{{.ID}}/complete">Retry completion</button>{{end}}</td>{{end}}
+        {{if $.Data.CanOpen}}<td class="act">{{if eq .UploadStatus "uploaded"}}<form method="post" action="/ui/entities/{{.EntityID}}/documents/{{.ID}}/open"><button type="submit">Open</button></form>{{end}}</td>{{end}}
       </tr>
     {{end}}
     </tbody>
@@ -142,5 +143,26 @@
 <p class="muted">Verified Entities don't accept new Documents.</p>
 {{end}}
 <div id="upload-status" class="status" role="status" aria-live="polite" hidden></div>
+{{if .Data.Trail}}
+<section class="card list" id="audit-trail">
+  <div class="card-head">
+    <h2>Audit Trail</h2>
+    <p>Oldest first. Compliance Officers only.</p>
+  </div>
+  <ol class="trail">
+  {{range .Data.Trail}}
+    <li>
+      <time>{{exactTime .At}}</time>
+      <div>
+        <span class="kind">{{.KindName}}{{if .Version}} · Version {{.Version}}{{end}}{{if .CycleOpened}} · Opens Review Cycle {{.CycleOpened}}{{end}}</span>
+        {{auditText .}}
+        {{with .Reason}}<em>{{.}}</em>{{end}}
+      </div>
+      <span class="by">{{actorName .Actor}}</span>
+    </li>
+  {{end}}
+  </ol>
+</section>
+{{end}}
 {{end}}
 {{define "scripts"}}{{if .Data.CanUpload}}<script src="/ui/static/upload.js" defer></script>{{end}}{{end}}

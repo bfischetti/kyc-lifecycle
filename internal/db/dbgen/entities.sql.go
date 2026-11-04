@@ -14,19 +14,25 @@ import (
 )
 
 const createEntity = `-- name: CreateEntity :one
-INSERT INTO entities (type, legal_name, country)
-VALUES ($1, $2, $3)
-RETURNING id, type, legal_name, country, status, version, created_at, updated_at
+INSERT INTO entities (type, legal_name, country, created_by)
+VALUES ($1, $2, $3, $4)
+RETURNING id, type, legal_name, country, status, version, created_at, updated_at, created_by
 `
 
 type CreateEntityParams struct {
 	Type      EntityType
 	LegalName string
 	Country   string
+	CreatedBy pgtype.UUID
 }
 
 func (q *Queries) CreateEntity(ctx context.Context, arg CreateEntityParams) (Entity, error) {
-	row := q.db.QueryRow(ctx, createEntity, arg.Type, arg.LegalName, arg.Country)
+	row := q.db.QueryRow(ctx, createEntity,
+		arg.Type,
+		arg.LegalName,
+		arg.Country,
+		arg.CreatedBy,
+	)
 	var i Entity
 	err := row.Scan(
 		&i.ID,
@@ -37,12 +43,13 @@ func (q *Queries) CreateEntity(ctx context.Context, arg CreateEntityParams) (Ent
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedBy,
 	)
 	return i, err
 }
 
 const getEntity = `-- name: GetEntity :one
-SELECT id, type, legal_name, country, status, version, created_at, updated_at FROM entities WHERE id = $1
+SELECT id, type, legal_name, country, status, version, created_at, updated_at, created_by FROM entities WHERE id = $1
 `
 
 func (q *Queries) GetEntity(ctx context.Context, id uuid.UUID) (Entity, error) {
@@ -57,12 +64,13 @@ func (q *Queries) GetEntity(ctx context.Context, id uuid.UUID) (Entity, error) {
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedBy,
 	)
 	return i, err
 }
 
 const getEntityForUpdate = `-- name: GetEntityForUpdate :one
-SELECT id, type, legal_name, country, status, version, created_at, updated_at FROM entities WHERE id = $1 FOR UPDATE
+SELECT id, type, legal_name, country, status, version, created_at, updated_at, created_by FROM entities WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetEntityForUpdate(ctx context.Context, id uuid.UUID) (Entity, error) {
@@ -77,12 +85,13 @@ func (q *Queries) GetEntityForUpdate(ctx context.Context, id uuid.UUID) (Entity,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedBy,
 	)
 	return i, err
 }
 
 const listEntitiesNewestFirst = `-- name: ListEntitiesNewestFirst :many
-SELECT id, type, legal_name, country, status, version, created_at, updated_at FROM entities
+SELECT id, type, legal_name, country, status, version, created_at, updated_at, created_by FROM entities
 WHERE ($2::entity_status IS NULL OR status = $2)
   AND ($3::entity_type IS NULL OR type = $3)
   AND ($4::timestamptz IS NULL
@@ -123,6 +132,7 @@ func (q *Queries) ListEntitiesNewestFirst(ctx context.Context, arg ListEntitiesN
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CreatedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -135,7 +145,7 @@ func (q *Queries) ListEntitiesNewestFirst(ctx context.Context, arg ListEntitiesN
 }
 
 const listEntitiesOldestFirst = `-- name: ListEntitiesOldestFirst :many
-SELECT id, type, legal_name, country, status, version, created_at, updated_at FROM entities
+SELECT id, type, legal_name, country, status, version, created_at, updated_at, created_by FROM entities
 WHERE ($2::entity_status IS NULL OR status = $2)
   AND ($3::entity_type IS NULL OR type = $3)
   AND ($4::timestamptz IS NULL
@@ -176,6 +186,7 @@ func (q *Queries) ListEntitiesOldestFirst(ctx context.Context, arg ListEntitiesO
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CreatedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -191,7 +202,7 @@ const updateEntityStatus = `-- name: UpdateEntityStatus :one
 UPDATE entities
 SET status = $3, version = version + 1, updated_at = now()
 WHERE id = $1 AND version = $2
-RETURNING id, type, legal_name, country, status, version, created_at, updated_at
+RETURNING id, type, legal_name, country, status, version, created_at, updated_at, created_by
 `
 
 type UpdateEntityStatusParams struct {
@@ -214,6 +225,7 @@ func (q *Queries) UpdateEntityStatus(ctx context.Context, arg UpdateEntityStatus
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedBy,
 	)
 	return i, err
 }

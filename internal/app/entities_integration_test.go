@@ -27,6 +27,7 @@ var (
 
 type listEnv struct {
 	svc   *app.Service
+	store *db.Store
 	admin *pgx.Conn
 }
 
@@ -44,7 +45,7 @@ func setupList(t *testing.T) listEnv {
 	}
 	t.Cleanup(func() { _ = admin.Close(context.Background()) })
 	// Listing and screening don't touch the vault.
-	return listEnv{svc: app.New(store, nil, screening.Mock{}, app.DefaultOptions), admin: admin}
+	return listEnv{svc: app.New(store, nil, screening.Mock{}, app.DefaultOptions), store: store, admin: admin}
 }
 
 // seed inserts an Entity directly, to control its status and position.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bfischetti/kyc-lifecycle/internal/db"
 	"github.com/bfischetti/kyc-lifecycle/internal/db/dbgen"
@@ -87,7 +88,9 @@ func (s *Service) CompleteUpload(ctx context.Context, actor kyc.Actor, entityID,
 		if _, err := kyc.Transition(from, kyc.EventCompletedUpload); err != nil {
 			return fmt.Errorf("%w: entity is %s", ErrConflict, from)
 		}
-		doc, err = q.MarkDocumentUploaded(ctx, docID)
+		doc, err = q.MarkDocumentUploaded(ctx, dbgen.MarkDocumentUploadedParams{
+			ID: docID, CompletedBy: pgtype.UUID{Bytes: actor.UserID, Valid: true},
+		})
 		if db.IsNoRows(err) { // still awaiting upload, so the window lapsed
 			return errUploadExpired
 		}

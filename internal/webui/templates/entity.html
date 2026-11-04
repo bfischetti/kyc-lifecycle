@@ -37,6 +37,38 @@
   </ul>
 </section>
 {{end}}
+{{with .Data.Decision}}
+<form class="card decision" id="decision" method="post" action="/ui/entities/{{$.Data.Entity.ID}}/decision">
+  <h2>Decision</h2>
+  <input type="hidden" name="expected_version" value="{{.Version}}">
+  <ul class="conseq">
+    {{if .Blockers}}
+    <li><strong>Approve</strong> is unavailable until these are resolved:
+      <ul>{{range .Blockers}}<li>{{.}}</li>{{end}}</ul>
+    </li>
+    {{else}}
+    <li><strong>Approve</strong> verifies this Entity and accepts {{.PendingDocs}}. This is final.</li>
+    {{end}}
+    <li><strong>Reject</strong> rejects this Entity and {{.PendingDocs}}. A new upload can start a Resubmission.</li>
+  </ul>
+  <div class="field{{if $.Data.ReasonError}} invalid{{end}}">
+    <label for="reason">Written reason</label>
+    <textarea id="reason" name="reason" rows="3">{{$.Data.Reason}}</textarea>
+    {{with $.Data.ReasonError}}<div class="field-error">{{.}}</div>{{end}}
+    <div class="hint">At least 10 characters. Recorded in the Audit Trail. Support Agents can't see it.</div>
+  </div>
+  <div class="actions">
+    <button class="primary" type="submit" name="decision" value="approve"{{if .Blockers}} disabled{{end}}>Approve</button>
+    <button class="danger" type="submit" name="decision" value="reject">Reject</button>
+  </div>
+</form>
+{{else}}{{with .Data.Reason}}
+<section class="card">
+  <h2>Your reason wasn't recorded</h2>
+  <p>This Entity can no longer be decided. Your text is kept here in case you need it.</p>
+  <textarea id="kept-reason" rows="3" readonly>{{.}}</textarea>
+</section>
+{{end}}{{end}}
 <section class="card list" id="documents">
   <div class="card-head"><h2>Documents</h2></div>
   {{if .Data.Resubmitted}}<p class="note">Resubmission: a new Review Cycle is open. Documents marked Rejected belong to an earlier cycle and don't count toward approval.</p>{{end}}

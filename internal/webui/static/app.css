@@ -94,3 +94,14 @@ button:disabled { background: var(--neutral-bg); color: #7b8590; border-color: v
 details summary { cursor: pointer; color: var(--accent); }
 pre { margin: var(--s2) 0 0; padding: var(--s2); max-width: 420px; overflow-x: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
 #checks td { vertical-align: top; }
+
+textarea { width: 100%; font: inherit; padding: var(--s2); border: 1px solid #c3cad2; border-radius: 6px; background: var(--surface); resize: vertical; }
+.invalid textarea { border-color: var(--bad); }
+.card textarea[readonly] { margin-top: var(--s2); background: var(--bg); }
+.decision h2 { margin-bottom: var(--s3); }
+.conseq { margin: 0 0 var(--s4); padding: 0; list-style: none; display: grid; gap: var(--s2); }
+.conseq strong { font-weight: 600; }
+.conseq ul { margin: var(--s1) 0 0; padding-left: var(--s5); color: var(--muted); }
+.actions { display: flex; gap: var(--s2); }
+button.danger { color: var(--bad); border-color: #e3b6b4; }
+button.danger:hover { background: var(--bad-bg); }

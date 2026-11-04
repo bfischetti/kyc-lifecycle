@@ -17,6 +17,7 @@ const (
 	ReadHistory     Action = "entity.history"
 	RunCheck        Action = "check.run"
 	Review          Action = "entity.review"
+	ReadChecklist   Action = "entity.checklist"
 	AccessEvidence  Action = "document.access"
 )
 
@@ -34,6 +35,9 @@ var grants = map[Action]map[kyc.Role]bool{
 	RunCheck: {kyc.RoleComplianceOfficer: true, kyc.RoleSystem: true},
 	// Decisions are made by people with compliance authority, never by automation.
 	Review: {kyc.RoleComplianceOfficer: true},
+	// The checklist is the decision's working view, and working out the Review
+	// Cycle takes audit data, so it goes with the decision.
+	ReadChecklist: {kyc.RoleComplianceOfficer: true},
 	// Opening a Document's contents is an Evidence Access: always a person,
 	// always compliance. Automation never needs the bytes.
 	AccessEvidence: {kyc.RoleComplianceOfficer: true},

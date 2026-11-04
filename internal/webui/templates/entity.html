@@ -13,6 +13,30 @@
   <h2>{{.Data.NextTitle}}</h2>
   <p>{{.Data.NextDetail}}</p>
 </section>
+{{with .Data.Notice}}<div class="status status-error" role="alert">{{.}}</div>{{end}}
+{{with .Data.Checklist}}
+<section class="card list" id="checklist">
+  <div class="card-head">
+    <h2>{{if $.Data.CanRun}}Approval checklist{{else}}Checklist for the Review Cycle that ended{{end}}</h2>
+    {{if $.Data.CanRun}}<p>{{if .Ready}}Every requirement is met.{{else}}Approval stays blocked until every item passes. There is no override.{{end}}</p>{{end}}
+  </div>
+  <ul class="checklist">
+  {{range .Items}}
+    <li class="item{{if eq .Problem "fail"}} item-fail{{end}}">
+      <span class="mark {{if .Problem}}mark-open{{else}}mark-ok{{end}}" aria-hidden="true">{{if .Problem}}!{{else}}✓{{end}}</span>
+      <span class="label"><strong>{{if .Check}}{{checkName .Check}}{{else}}{{docsName .Documents}}{{end}}</strong><br><span class="muted">{{problem .}}</span></span>
+      {{if and $.Data.CanRun .Check}}
+      <form method="post" action="/ui/entities/{{$.Data.Entity.ID}}/checks">
+        <input type="hidden" name="idempotency_key" value="{{newKey}}">
+        <input type="hidden" name="check_type" value="{{.Check}}">
+        <button type="submit">{{if eq .Problem "missing"}}Run{{else}}Run again{{end}}</button>
+      </form>
+      {{end}}
+    </li>
+  {{end}}
+  </ul>
+</section>
+{{end}}
 <section class="card list" id="documents">
   <div class="card-head"><h2>Documents</h2></div>
   {{if .Data.Resubmitted}}<p class="note">Resubmission: a new Review Cycle is open. Documents marked Rejected belong to an earlier cycle and don't count toward approval.</p>{{end}}
@@ -34,6 +58,29 @@
   </table>
   {{else}}
   <p class="empty">No Documents yet.</p>
+  {{end}}
+</section>
+<section class="card list" id="checks">
+  <div class="card-head">
+    <h2>Checks</h2>
+    {{if not .Data.ShowRaw}}<p>Results from earlier Review Cycles don't count.</p>{{end}}
+  </div>
+  {{if .Data.Checks}}
+  <table>
+    <thead><tr><th>Type</th><th>Result</th><th>Run</th>{{if .Data.ShowRaw}}<th>Raw response</th>{{end}}</tr></thead>
+    <tbody>
+    {{range .Data.Checks}}
+      <tr{{if eq .Result "fail"}} class="row-fail"{{end}}>
+        <td>{{checkName .Type}}</td>
+        <td><span class="badge badge-{{.Result}}">{{resultName .Result}}</span></td>
+        <td class="muted">{{timestamp .CreatedAt}}{{if $.Data.Checklist}}{{if .CreatedAt.Before $.Data.Checklist.CycleStart}} · Earlier Review Cycle{{end}}{{end}}</td>
+        {{if $.Data.ShowRaw}}<td>{{if .RawResponse}}<details><summary>Show</summary><pre>{{pretty .RawResponse}}</pre></details>{{end}}</td>{{end}}
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="empty">No Checks yet.</p>
   {{end}}
 </section>
 {{if .Data.CanUpload}}

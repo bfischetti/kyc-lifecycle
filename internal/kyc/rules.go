@@ -79,11 +79,7 @@ func UnmetForApproval(in ApprovalInput) []Unmet {
 	}
 
 	required := RequiredDocuments(in.EntityType)
-	names := make([]string, len(required))
-	for i, d := range required {
-		names[i] = string(d)
-	}
-	requirement := "document:" + strings.Join(names, "|")
+	requirement := documentRequirement(required)
 
 	today := truncateToDate(in.Today)
 	found, expired := false, false
@@ -107,6 +103,38 @@ func UnmetForApproval(in ApprovalInput) []Unmet {
 
 	sort.SliceStable(unmet, func(i, j int) bool { return unmet[i].Requirement < unmet[j].Requirement })
 	return unmet
+}
+
+func documentRequirement(required []DocumentType) string {
+	names := make([]string, len(required))
+	for i, d := range required {
+		names[i] = string(d)
+	}
+	return "document:" + strings.Join(names, "|")
+}
+
+// ChecklistItem is one approval requirement and where it stands. Exactly one of
+// Check and Documents is set.
+type ChecklistItem struct {
+	Check     CheckType      // a Required Check
+	Documents []DocumentType // the Required Documents, any one of which will do
+	Problem   string         // as in Unmet; empty means the requirement is met
+}
+
+// Checklist lays out every approval requirement for an Entity of type t. What
+// counts as met comes only from unmet, the list UnmetForApproval produced, so
+// the checklist can't disagree with the approval decision.
+func Checklist(t EntityType, unmet []Unmet) []ChecklistItem {
+	problems := make(map[string]string, len(unmet))
+	for _, u := range unmet {
+		problems[u.Requirement] = u.Problem
+	}
+	var items []ChecklistItem
+	for _, ct := range RequiredChecks(t) {
+		items = append(items, ChecklistItem{Check: ct, Problem: problems["check:"+string(ct)]})
+	}
+	required := RequiredDocuments(t)
+	return append(items, ChecklistItem{Documents: required, Problem: problems[documentRequirement(required)]})
 }
 
 func truncateToDate(t time.Time) time.Time {

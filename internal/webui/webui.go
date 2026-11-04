@@ -24,6 +24,7 @@ import (
 	"github.com/bfischetti/kyc-lifecycle/internal/app"
 	"github.com/bfischetti/kyc-lifecycle/internal/kyc"
 	"github.com/bfischetti/kyc-lifecycle/internal/observability"
+	"github.com/bfischetti/kyc-lifecycle/internal/policy"
 )
 
 const (
@@ -53,6 +54,12 @@ var funcs = template.FuncMap{
 	"statusName": statusName,
 	"typeName":   typeName,
 	"docName":    docTypeName,
+	"checkName":  checkTypeName,
+	"resultName": resultName,
+	"docsName":   documentsName,
+	"problem":    problemName,
+	"newKey":     uuid.NewString,
+	"pretty":     prettyJSON,
 	"uploadName": uploadStatusName,
 	"reviewName": reviewStatusName,
 	"date":       func(t time.Time) string { return t.Format(kyc.DateLayout) },
@@ -88,6 +95,7 @@ func Handler(svc *app.Service, log *slog.Logger) http.Handler {
 	mux.Handle("GET /ui/entities/new", u.authed(u.newEntity))
 	mux.Handle("POST /ui/entities", u.authed(u.createEntity))
 	mux.Handle("GET /ui/entities/{id}", u.authed(u.entity))
+	mux.Handle("POST /ui/entities/{id}/checks", u.authed(u.runCheck))
 	mux.Handle("POST /ui/entities/{id}/documents", u.authed(u.declareDocument))
 	mux.Handle("POST /ui/entities/{id}/documents/{docID}/complete", u.authed(u.completeUpload))
 	mux.Handle("/ui/", u.authed(func(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
@@ -337,7 +345,14 @@ func (u *ui) createEntity(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
 		return
 	}
 
-	id, err := u.createOnce(r.Context(), a, r.PostFormValue("idempotency_key"), in)
+	fingerprint := []byte("ui create entity\n" + string(in.Type) + "\n" + in.LegalName + "\n" + in.Country)
+	id, err := u.once(r.Context(), a, r.PostFormValue("idempotency_key"), fingerprint, func() (string, error) {
+		e, err := u.svc.CreateEntity(r.Context(), a, in)
+		if err != nil {
+			return "", err
+		}
+		return e.ID.String(), nil
+	})
 	if err != nil {
 		u.internal(w, r, &a, err)
 		return
@@ -346,16 +361,15 @@ func (u *ui) createEntity(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
 	http.Redirect(w, r, "/ui/entities/"+id, http.StatusSeeOther)
 }
 
-// createOnce makes a double-submitted form create a single Entity: every
-// submission with the same key gets the first one's id.
-func (u *ui) createOnce(ctx context.Context, a kyc.Actor, key string, in kyc.NewEntity) (string, error) {
+// once makes a double-submitted form do its work a single time: every
+// submission with the same key gets the first one's result.
+func (u *ui) once(ctx context.Context, a kyc.Actor, key string, fingerprint []byte, work func() (string, error)) (string, error) {
 	if !validIdempotencyKey.MatchString(key) {
 		key = uuid.NewString()
 	}
-	fingerprint := []byte("ui create entity\n" + string(in.Type) + "\n" + in.LegalName + "\n" + in.Country)
 	stored, err := u.svc.BeginIdempotent(ctx, a, key, fingerprint)
 	if errors.Is(err, app.ErrIdempotencyKeyReused) {
-		// Back, edit, submit again: the same form key, but a different Entity.
+		// Back, edit, submit again: the same form key, but a different request.
 		key = uuid.NewString()
 		stored, err = u.svc.BeginIdempotent(ctx, a, key, fingerprint)
 	}
@@ -365,18 +379,17 @@ func (u *ui) createOnce(ctx context.Context, a kyc.Actor, key string, in kyc.New
 	if stored != nil {
 		return string(stored.Body), nil
 	}
-	e, err := u.svc.CreateEntity(ctx, a, in)
+	result, err := work()
 	if err != nil {
 		// A 5xx frees the key for a retry.
 		_ = u.svc.FinishIdempotent(context.WithoutCancel(ctx), a, key, http.StatusInternalServerError, nil)
 		return "", err
 	}
-	id := e.ID.String()
-	// The Entity exists, so this request still succeeds if storing fails.
-	if err := u.svc.FinishIdempotent(context.WithoutCancel(ctx), a, key, http.StatusSeeOther, []byte(id)); err != nil {
+	// The work is done, so this request still succeeds if storing fails.
+	if err := u.svc.FinishIdempotent(context.WithoutCancel(ctx), a, key, http.StatusSeeOther, []byte(result)); err != nil {
 		u.log.ErrorContext(ctx, "store idempotent response", slog.String("error", err.Error()))
 	}
-	return id, nil
+	return result, nil
 }
 
 type entityPage struct {
@@ -384,6 +397,16 @@ type entityPage struct {
 	NextTitle  string
 	NextDetail string
 	Documents  []kyc.Document
+	Checks     []kyc.Check
+	// Checklist is nil for anyone who may not read it, and for an Entity with
+	// no Review Cycle to show.
+	Checklist *app.Checklist
+	// ShowRaw is whether this role sees Screening Providers' raw responses.
+	ShowRaw bool
+	// CanRun is whether the checklist offers running Checks.
+	CanRun bool
+	// Notice reports why the last action didn't happen.
+	Notice string
 	// CanUpload is whether this page offers uploading. The form is the Support
 	// Agent's: officers review what agents attach.
 	CanUpload bool
@@ -400,6 +423,10 @@ func (u *ui) entity(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
 		return
 	}
 	observability.Annotate(r.Context(), slog.String("entity_id", id.String()))
+	u.renderEntity(w, r, a, id, http.StatusOK, "")
+}
+
+func (u *ui) renderEntity(w http.ResponseWriter, r *http.Request, a kyc.Actor, id uuid.UUID, status int, notice string) {
 	v, err := u.svc.GetEntity(r.Context(), a, id)
 	switch {
 	case errors.Is(err, app.ErrNotFound):
@@ -410,10 +437,27 @@ func (u *ui) entity(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
 		return
 	}
 	title, detail := nextStep(a.Role, v.Entity)
-	u.render(w, r, http.StatusOK, "entity", view{
+	var checklist *app.Checklist
+	if policy.Allowed(a.Role, policy.ReadChecklist) {
+		cl, err := u.svc.ReviewChecklist(r.Context(), a, id)
+		if err != nil {
+			u.internal(w, r, &a, err)
+			return
+		}
+		if len(cl.Items) > 0 {
+			checklist = &cl
+		}
+		if cl.SystemRejection {
+			title, detail = "System Rejection", "A Hard Fail rejected this Entity automatically. A new Completed Upload would start a Resubmission and a new Review Cycle."
+		}
+	}
+	u.render(w, r, status, "entity", view{
 		Title: v.Entity.LegalName, Actor: &a,
 		Data: entityPage{
-			Entity: v.Entity, NextTitle: title, NextDetail: detail, Documents: v.Documents,
+			Entity: v.Entity, NextTitle: title, NextDetail: detail, Documents: v.Documents, Checks: v.Checks,
+			Checklist: checklist, Notice: notice,
+			ShowRaw:     policy.CanSee(a.Role, policy.CheckRawResponse),
+			CanRun:      policy.Allowed(a.Role, policy.RunCheck) && v.Entity.Status == kyc.StatusPendingReview,
 			CanUpload:   a.Role == kyc.RoleSupportAgent && v.Entity.Status != kyc.StatusVerified,
 			Resubmitted: v.Entity.Status == kyc.StatusPendingReview && hasRejectedDocument(v.Documents),
 			DocTypes:    documentTypes,
@@ -431,6 +475,43 @@ func hasRejectedDocument(docs []kyc.Document) bool {
 		}
 	}
 	return false
+}
+
+func (u *ui) runCheck(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		u.notFound(w, r, &a)
+		return
+	}
+	observability.Annotate(r.Context(), slog.String("entity_id", id.String()))
+	r.Body = http.MaxBytesReader(w, r.Body, maxForm)
+	if err := r.ParseForm(); err != nil {
+		u.message(w, r, http.StatusBadRequest, &a, "Couldn't read the form", "Go back and try again.")
+		return
+	}
+	checkType := kyc.CheckType(r.PostFormValue("check_type"))
+	fingerprint := []byte("ui run check\n" + id.String() + "\n" + string(checkType))
+	_, err = u.once(r.Context(), a, r.PostFormValue("idempotency_key"), fingerprint, func() (string, error) {
+		_, _, err := u.svc.RunCheck(r.Context(), a, id, checkType)
+		return "", err
+	})
+	_, invalid := kyc.AsValidationError(err)
+	switch {
+	case err == nil:
+		http.Redirect(w, r, "/ui/entities/"+id.String(), http.StatusSeeOther)
+	case errors.Is(err, app.ErrNotFound):
+		u.notFound(w, r, &a)
+	case errors.Is(err, app.ErrForbidden):
+		u.message(w, r, http.StatusForbidden, &a, "Not allowed", "Only a Compliance Officer can run Checks.")
+	case errors.Is(err, app.ErrProviderUnavailable):
+		u.renderEntity(w, r, a, id, http.StatusBadGateway, checkTypeName(checkType)+": the Screening Provider didn't answer. Nothing was recorded, so this Check still stands as it did. Try again.")
+	case errors.Is(err, app.ErrConflict):
+		u.renderEntity(w, r, a, id, http.StatusConflict, "Checks run only while an Entity is pending review, and this one no longer is. Nothing was recorded.")
+	case invalid:
+		u.renderEntity(w, r, a, id, http.StatusBadRequest, "That Check Type doesn't exist. Nothing was recorded.")
+	default:
+		u.internal(w, r, &a, err)
+	}
 }
 
 // The upload script's two calls answer in JSON, because it has to stay on the
@@ -608,6 +689,72 @@ func documentName(d kyc.DocumentType) string {
 
 // Every Document type an agent can attach, in the order a form lists them.
 var documentTypes = []kyc.DocumentType{kyc.DocPassport, kyc.DocNationalID, kyc.DocBusinessRegistration, kyc.DocProofOfAddress}
+
+func checkTypeName(c kyc.CheckType) string {
+	switch c {
+	case kyc.CheckSanctions:
+		return "Sanctions screening"
+	case kyc.CheckPEP:
+		return "PEP screening"
+	case kyc.CheckAddress:
+		return "Address verification"
+	}
+	return string(c)
+}
+
+func resultName(r kyc.CheckResult) string {
+	switch r {
+	case kyc.ResultPass:
+		return "Pass"
+	case kyc.ResultFail:
+		return "Hard Fail"
+	case kyc.ResultManualReview:
+		return "Manual review"
+	}
+	return string(r)
+}
+
+// documentsName lists the Required Documents as alternatives.
+func documentsName(types []kyc.DocumentType) string {
+	names := make([]string, len(types))
+	for i, d := range types {
+		names[i] = docTypeName(d)
+	}
+	return strings.Join(names, " or ")
+}
+
+// problemName says what is wrong with a checklist item.
+func problemName(item kyc.ChecklistItem) string {
+	switch item.Problem {
+	case "":
+		if item.Check != "" {
+			return "Pass"
+		}
+		return "Present"
+	case "missing":
+		if item.Check != "" {
+			return "Not run in this Review Cycle"
+		}
+		return "Missing from this Review Cycle"
+	case "expired":
+		return "Expired"
+	case string(kyc.ResultFail):
+		return "Hard Fail"
+	case string(kyc.ResultManualReview):
+		return "Manual review: blocks approval until a re-run passes"
+	}
+	return item.Problem
+}
+
+// prettyJSON indents a provider payload for reading. It's shown as it arrived
+// if it can't be parsed.
+func prettyJSON(raw json.RawMessage) string {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, raw, "", "  "); err != nil {
+		return string(raw)
+	}
+	return buf.String()
+}
 
 func docTypeName(d kyc.DocumentType) string {
 	switch d {

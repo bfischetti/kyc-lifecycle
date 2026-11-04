@@ -13,4 +13,55 @@
   <h2>{{.Data.NextTitle}}</h2>
   <p>{{.Data.NextDetail}}</p>
 </section>
+<section class="card list" id="documents">
+  <div class="card-head"><h2>Documents</h2></div>
+  {{if .Data.Resubmitted}}<p class="note">Resubmission: a new Review Cycle is open. Documents marked Rejected belong to an earlier cycle and don't count toward approval.</p>{{end}}
+  {{if .Data.Documents}}
+  <table>
+    <thead><tr><th>Type</th><th>Upload</th><th>Review</th><th>Expiry</th><th>Declared</th>{{if .Data.CanUpload}}<th></th>{{end}}</tr></thead>
+    <tbody>
+    {{range .Data.Documents}}
+      <tr>
+        <td>{{docName .Type}}</td>
+        <td>{{uploadName .UploadStatus}}</td>
+        <td>{{if eq .UploadStatus "uploaded"}}{{reviewName .ReviewStatus}}{{else}}<span class="muted">None</span>{{end}}</td>
+        <td>{{if .ExpiryDate}}{{date .ExpiryDate}}{{else}}<span class="muted">None</span>{{end}}</td>
+        <td class="muted">{{timestamp .CreatedAt}}</td>
+        {{if $.Data.CanUpload}}<td class="act">{{if eq .UploadStatus "awaiting_upload"}}<button type="button" data-complete-url="/ui/entities/{{.EntityID}}/documents/{{.ID}}/complete">Retry completion</button>{{end}}</td>{{end}}
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="empty">No Documents yet.</p>
+  {{end}}
+</section>
+{{if .Data.CanUpload}}
+<form class="card upload" id="upload" action="/ui/entities/{{.Data.Entity.ID}}/documents" data-max-bytes="{{.Data.MaxBytes}}">
+  <h2>{{if eq .Data.Entity.Status "rejected"}}Upload a new Document to resubmit{{else}}Upload a Document{{end}}</h2>
+  <div class="fields">
+    <div class="field">
+      <label for="doc_type">Type</label>
+      <select id="doc_type" name="doc_type" required>
+        {{range .Data.DocTypes}}<option value="{{.}}">{{docName .}}</option>
+        {{end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="expiry_date">Expiry date <span class="muted">(optional)</span></label>
+      <input type="date" id="expiry_date" name="expiry_date">
+    </div>
+    <div class="field">
+      <label for="file">File</label>
+      <input type="file" id="file" name="file" accept="application/pdf,image/jpeg,image/png" required>
+      <div class="hint">PDF, JPEG or PNG, up to 10 MiB.</div>
+    </div>
+  </div>
+  <button class="primary" type="submit">Upload</button>
+</form>
+{{else if eq .Data.Entity.Status "verified"}}
+<p class="muted">Verified Entities don't accept new Documents.</p>
 {{end}}
+<div id="upload-status" class="status" role="status" aria-live="polite" hidden></div>
+{{end}}
+{{define "scripts"}}{{if .Data.CanUpload}}<script src="/ui/static/upload.js" defer></script>{{end}}{{end}}

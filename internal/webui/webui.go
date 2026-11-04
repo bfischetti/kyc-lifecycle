@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"html/template"
 	"io/fs"
@@ -51,6 +52,10 @@ var funcs = template.FuncMap{
 	"roleName":   roleName,
 	"statusName": statusName,
 	"typeName":   typeName,
+	"docName":    docTypeName,
+	"uploadName": uploadStatusName,
+	"reviewName": reviewStatusName,
+	"date":       func(t time.Time) string { return t.Format(kyc.DateLayout) },
 	"timestamp":  func(t time.Time) string { return t.UTC().Format("2 Jan 2006, 15:04 UTC") },
 }
 
@@ -83,6 +88,8 @@ func Handler(svc *app.Service, log *slog.Logger) http.Handler {
 	mux.Handle("GET /ui/entities/new", u.authed(u.newEntity))
 	mux.Handle("POST /ui/entities", u.authed(u.createEntity))
 	mux.Handle("GET /ui/entities/{id}", u.authed(u.entity))
+	mux.Handle("POST /ui/entities/{id}/documents", u.authed(u.declareDocument))
+	mux.Handle("POST /ui/entities/{id}/documents/{docID}/complete", u.authed(u.completeUpload))
 	mux.Handle("/ui/", u.authed(func(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
 		u.notFound(w, r, &a)
 	}))
@@ -376,6 +383,14 @@ type entityPage struct {
 	Entity     kyc.Entity
 	NextTitle  string
 	NextDetail string
+	Documents  []kyc.Document
+	// CanUpload is whether this page offers uploading. The form is the Support
+	// Agent's: officers review what agents attach.
+	CanUpload bool
+	// Resubmitted says an earlier Review Cycle's Documents are on this page.
+	Resubmitted bool
+	DocTypes    []kyc.DocumentType
+	MaxBytes    int64
 }
 
 func (u *ui) entity(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
@@ -397,8 +412,147 @@ func (u *ui) entity(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
 	title, detail := nextStep(a.Role, v.Entity)
 	u.render(w, r, http.StatusOK, "entity", view{
 		Title: v.Entity.LegalName, Actor: &a,
-		Data: entityPage{Entity: v.Entity, NextTitle: title, NextDetail: detail},
+		Data: entityPage{
+			Entity: v.Entity, NextTitle: title, NextDetail: detail, Documents: v.Documents,
+			CanUpload:   a.Role == kyc.RoleSupportAgent && v.Entity.Status != kyc.StatusVerified,
+			Resubmitted: v.Entity.Status == kyc.StatusPendingReview && hasRejectedDocument(v.Documents),
+			DocTypes:    documentTypes,
+			MaxBytes:    kyc.MaxDocumentBytes,
+		},
 	})
+}
+
+// An open Review Cycle alongside a rejected Document can only be a Resubmission:
+// Documents are rejected when a cycle ends.
+func hasRejectedDocument(docs []kyc.Document) bool {
+	for _, d := range docs {
+		if d.ReviewStatus == kyc.ReviewRejected {
+			return true
+		}
+	}
+	return false
+}
+
+// The upload script's two calls answer in JSON, because it has to stay on the
+// page to report a failure and offer a retry. Every failure carries a message
+// written for the person reading it.
+
+type uploadFailure struct {
+	Message string `json:"message"`
+	// Retry says the same completion may still work. Otherwise the agent
+	// starts a new upload.
+	Retry bool `json:"retry,omitempty"`
+}
+
+func (u *ui) writeJSON(w http.ResponseWriter, r *http.Request, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		u.log.ErrorContext(r.Context(), "write response", slog.String("error", err.Error()))
+	}
+}
+
+func (u *ui) uploadError(w http.ResponseWriter, r *http.Request, err error) {
+	if ve, ok := kyc.AsValidationError(err); ok {
+		msgs := make([]string, len(ve.Fields))
+		for i, f := range ve.Fields {
+			msgs[i] = uploadFieldMessage(f)
+		}
+		u.writeJSON(w, r, http.StatusUnprocessableEntity, uploadFailure{Message: strings.Join(msgs, " ")})
+		return
+	}
+	switch {
+	case errors.Is(err, app.ErrNotFound):
+		u.writeJSON(w, r, http.StatusNotFound, uploadFailure{Message: "This Entity or Document no longer exists."})
+	case errors.Is(err, app.ErrForbidden):
+		u.writeJSON(w, r, http.StatusForbidden, uploadFailure{Message: "Your role can't upload Documents."})
+	case errors.Is(err, app.ErrConflict):
+		u.writeJSON(w, r, http.StatusConflict, uploadFailure{Message: "This Entity no longer accepts Documents. Refresh the page to see where it stands."})
+	case errors.Is(err, app.ErrGone):
+		u.writeJSON(w, r, http.StatusGone, uploadFailure{Message: "This upload has expired. Start a new upload."})
+	case errors.Is(err, app.ErrUploadMismatch):
+		u.writeJSON(w, r, http.StatusUnprocessableEntity, uploadFailure{Message: "The Evidence Vault doesn't hold a valid copy of this file, so it wasn't accepted. Check the file and start a new upload."})
+	default:
+		u.log.ErrorContext(r.Context(), "upload step failed", slog.String("error", err.Error()))
+		u.writeJSON(w, r, http.StatusInternalServerError, uploadFailure{Message: "The service couldn't finish this step.", Retry: true})
+	}
+}
+
+func uploadFieldMessage(f kyc.FieldError) string {
+	switch f.Field {
+	case "doc_type":
+		return "Choose a Document type."
+	case "expiry_date":
+		return "Enter a real expiry date, or leave it empty."
+	case "content_type":
+		return "The file must be a PDF, JPEG or PNG."
+	case "size_bytes":
+		return "The file must be no larger than 10 MiB, and not empty."
+	case "sha256":
+		return "The file couldn't be fingerprinted. Try again."
+	}
+	return f.Message
+}
+
+// declaration is what the upload script sends once it has fingerprinted a file.
+type declaration struct {
+	DocType     string `json:"doc_type"`
+	ExpiryDate  string `json:"expiry_date"`
+	ContentType string `json:"content_type"`
+	SizeBytes   int64  `json:"size_bytes"`
+	SHA256      string `json:"sha256"`
+}
+
+type uploadGrant struct {
+	CompleteURL string            `json:"complete_url"`
+	Method      string            `json:"method"`
+	URL         string            `json:"url"`
+	Headers     map[string]string `json:"headers"`
+}
+
+func (u *ui) declareDocument(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
+	entityID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		u.uploadError(w, r, app.ErrNotFound)
+		return
+	}
+	observability.Annotate(r.Context(), slog.String("entity_id", entityID.String()))
+	var in declaration
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxForm)).Decode(&in); err != nil {
+		u.writeJSON(w, r, http.StatusBadRequest, uploadFailure{Message: "The upload request couldn't be read. Refresh the page and try again."})
+		return
+	}
+	doc, perm, err := u.svc.DeclareDocument(r.Context(), a, entityID, kyc.NewDocument{
+		Type: kyc.DocumentType(in.DocType), ExpiryDate: in.ExpiryDate,
+		ContentType: in.ContentType, SizeBytes: in.SizeBytes, SHA256: in.SHA256,
+	})
+	if err != nil {
+		u.uploadError(w, r, err)
+		return
+	}
+	u.writeJSON(w, r, http.StatusCreated, uploadGrant{
+		CompleteURL: "/ui/entities/" + entityID.String() + "/documents/" + doc.ID.String() + "/complete",
+		Method:      perm.Method, URL: perm.URL, Headers: perm.Headers,
+	})
+}
+
+func (u *ui) completeUpload(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
+	entityID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		u.uploadError(w, r, app.ErrNotFound)
+		return
+	}
+	docID, err := uuid.Parse(r.PathValue("docID"))
+	if err != nil {
+		u.uploadError(w, r, app.ErrNotFound)
+		return
+	}
+	observability.Annotate(r.Context(), slog.String("entity_id", entityID.String()))
+	if _, _, err := u.svc.CompleteUpload(r.Context(), a, entityID, docID); err != nil {
+		u.uploadError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // nextStep says, in the glossary's words, what happens next for this role.
@@ -450,6 +604,47 @@ func documentName(d kyc.DocumentType) string {
 		return "a proof of address"
 	}
 	return string(d)
+}
+
+// Every Document type an agent can attach, in the order a form lists them.
+var documentTypes = []kyc.DocumentType{kyc.DocPassport, kyc.DocNationalID, kyc.DocBusinessRegistration, kyc.DocProofOfAddress}
+
+func docTypeName(d kyc.DocumentType) string {
+	switch d {
+	case kyc.DocPassport:
+		return "Passport"
+	case kyc.DocNationalID:
+		return "National ID"
+	case kyc.DocBusinessRegistration:
+		return "Business registration"
+	case kyc.DocProofOfAddress:
+		return "Proof of address"
+	}
+	return string(d)
+}
+
+func uploadStatusName(s kyc.UploadStatus) string {
+	switch s {
+	case kyc.UploadAwaiting:
+		return "Awaiting upload"
+	case kyc.UploadComplete:
+		return "Completed"
+	case kyc.UploadExpired:
+		return "Expired"
+	}
+	return string(s)
+}
+
+func reviewStatusName(s kyc.DocumentReviewStatus) string {
+	switch s {
+	case kyc.ReviewPending:
+		return "Pending"
+	case kyc.ReviewAccepted:
+		return "Accepted"
+	case kyc.ReviewRejected:
+		return "Rejected"
+	}
+	return string(s)
 }
 
 func roleName(r kyc.Role) string {

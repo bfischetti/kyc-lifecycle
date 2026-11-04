@@ -59,12 +59,15 @@ var funcs = template.FuncMap{
 	"resultName": resultName,
 	"docsName":   documentsName,
 	"problem":    problemName,
+	"actorName":  actorName,
+	"auditText":  auditText,
 	"newKey":     uuid.NewString,
 	"pretty":     prettyJSON,
 	"uploadName": uploadStatusName,
 	"reviewName": reviewStatusName,
 	"date":       func(t time.Time) string { return t.Format(kyc.DateLayout) },
 	"timestamp":  func(t time.Time) string { return t.UTC().Format("2 Jan 2006, 15:04 UTC") },
+	"exactTime":  func(t time.Time) string { return t.UTC().Format("2 Jan 2006, 15:04:05 UTC") },
 }
 
 // Parsing here means a broken template stops the service at startup rather
@@ -100,6 +103,7 @@ func Handler(svc *app.Service, log *slog.Logger) http.Handler {
 	mux.Handle("POST /ui/entities/{id}/decision", u.authed(u.decide))
 	mux.Handle("POST /ui/entities/{id}/documents", u.authed(u.declareDocument))
 	mux.Handle("POST /ui/entities/{id}/documents/{docID}/complete", u.authed(u.completeUpload))
+	mux.Handle("POST /ui/entities/{id}/documents/{docID}/open", u.authed(u.openDocument))
 	mux.Handle("/ui/", u.authed(func(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
 		u.notFound(w, r, &a)
 	}))
@@ -409,6 +413,10 @@ type entityPage struct {
 	CanRun bool
 	// Decision is the officer's panel, nil when there is nothing to decide.
 	Decision *decisionPanel
+	// CanOpen is whether this role can open a Document's contents.
+	CanOpen bool
+	// Trail is nil for anyone who may not read the Audit Trail.
+	Trail []app.AuditEvent
 	entityPageState
 	// CanUpload is whether this page offers uploading. The form is the Support
 	// Agent's: officers review what agents attach.
@@ -504,6 +512,14 @@ func (u *ui) renderEntity(w http.ResponseWriter, r *http.Request, a kyc.Actor, i
 			title, detail = "System Rejection", "A Hard Fail rejected this Entity automatically. A new Completed Upload would start a Resubmission and a new Review Cycle."
 		}
 	}
+	var trail []app.AuditEvent
+	if policy.Allowed(a.Role, policy.ReadAuditTrail) {
+		trail, err = u.svc.AuditTrail(r.Context(), a, id)
+		if err != nil {
+			u.internal(w, r, &a, err)
+			return
+		}
+	}
 	var panel *decisionPanel
 	if policy.Allowed(a.Role, policy.Review) && v.Entity.Status == kyc.StatusPendingReview {
 		panel = newDecisionPanel(v.Entity, v.Documents, checklist)
@@ -512,7 +528,8 @@ func (u *ui) renderEntity(w http.ResponseWriter, r *http.Request, a kyc.Actor, i
 		Title: v.Entity.LegalName, Actor: &a,
 		Data: entityPage{
 			Entity: v.Entity, NextTitle: title, NextDetail: detail, Documents: v.Documents, Checks: v.Checks,
-			Checklist: checklist, Decision: panel, entityPageState: state,
+			Checklist: checklist, Decision: panel, entityPageState: state, Trail: trail,
+			CanOpen:     policy.Allowed(a.Role, policy.AccessEvidence),
 			ShowRaw:     policy.CanSee(a.Role, policy.CheckRawResponse),
 			CanRun:      policy.Allowed(a.Role, policy.RunCheck) && v.Entity.Status == kyc.StatusPendingReview,
 			CanUpload:   a.Role == kyc.RoleSupportAgent && v.Entity.Status != kyc.StatusVerified,
@@ -620,6 +637,36 @@ func (u *ui) decide(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
 	case errors.Is(err, app.ErrConflict):
 		state.Notice = "Only an Entity pending review can be decided, so nothing was recorded."
 		u.renderEntity(w, r, a, id, http.StatusConflict, state)
+	default:
+		u.internal(w, r, &a, err)
+	}
+}
+
+// openDocument is an Evidence Access. It's a POST so that nothing but a real
+// click can add to the Audit Trail (ADR-0003): the access is recorded, and only
+// then does the browser get the short-lived download link.
+func (u *ui) openDocument(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
+	entityID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		u.notFound(w, r, &a)
+		return
+	}
+	docID, err := uuid.Parse(r.PathValue("docID"))
+	if err != nil {
+		u.notFound(w, r, &a)
+		return
+	}
+	observability.Annotate(r.Context(), slog.String("entity_id", entityID.String()))
+	perm, err := u.svc.AccessEvidence(r.Context(), a, entityID, docID)
+	switch {
+	case err == nil:
+		http.Redirect(w, r, perm.URL, http.StatusSeeOther)
+	case errors.Is(err, app.ErrNotFound):
+		u.notFound(w, r, &a)
+	case errors.Is(err, app.ErrForbidden):
+		u.message(w, r, http.StatusForbidden, &a, "Not allowed", "Only a Compliance Officer can open a Document.")
+	case errors.Is(err, app.ErrConflict):
+		u.renderEntity(w, r, a, entityID, http.StatusConflict, entityPageState{Notice: "Only a Completed Upload has contents to open. Nothing was recorded."})
 	default:
 		u.internal(w, r, &a, err)
 	}
@@ -801,6 +848,37 @@ func documentName(d kyc.DocumentType) string {
 // Every Document type an agent can attach, in the order a form lists them.
 var documentTypes = []kyc.DocumentType{kyc.DocPassport, kyc.DocNationalID, kyc.DocBusinessRegistration, kyc.DocProofOfAddress}
 
+// actorName says who did something. A nil actor is an older row, from before
+// that action's actor was recorded.
+func actorName(a *kyc.Actor) string {
+	if a == nil {
+		return "Not recorded"
+	}
+	id := a.UserID.String()
+	return roleName(a.Role) + " · …" + id[len(id)-4:]
+}
+
+// auditText is what a trail entry says happened.
+func auditText(e app.AuditEvent) string {
+	switch e.Kind {
+	case app.AuditEntityCreated:
+		return "Entity created"
+	case app.AuditStatusChanged:
+		return statusName(e.From) + " → " + statusName(e.To)
+	case app.AuditCheckRecorded:
+		return checkTypeName(e.Check) + ": " + resultName(e.Result)
+	case app.AuditDocumentDeclared:
+		return docTypeName(e.Document) + " declared"
+	case app.AuditDocumentCompleted:
+		return docTypeName(e.Document) + " upload completed"
+	case app.AuditDocumentExpired:
+		return docTypeName(e.Document) + " upload expired"
+	case app.AuditEvidenceAccessed:
+		return docTypeName(e.Document) + " opened"
+	}
+	return e.KindName()
+}
+
 func checkTypeName(c kyc.CheckType) string {
 	switch c {
 	case kyc.CheckSanctions:
@@ -911,6 +989,8 @@ func roleName(r kyc.Role) string {
 		return "Compliance Officer"
 	case kyc.RoleSupportAgent:
 		return "Support Agent"
+	case kyc.RoleSystem:
+		return "System"
 	}
 	return string(r)
 }

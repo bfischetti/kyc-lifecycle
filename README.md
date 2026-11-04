@@ -5,7 +5,7 @@ A Go service that takes a merchant (KYB) or individual (KYC) from first contact 
 It is built to resemble how a regulated company would run this, not just to pass a spec. Document bytes live in a private evidence vault and never pass through the API. Every access to them is logged. Access is enforced in the application, and Postgres row-level security backs it up. Notifications go through a transactional outbox, so a status change and its notification are committed together.
 
 - **Domain language:** [`CONTEXT.md`](CONTEXT.md). Words in **bold** below are defined there.
-- **Architecture decisions:** [ADR-0001 evidence vault with RLS backstop](docs/adr/0001-evidence-vault-with-rls-backstop.md), [ADR-0002 presigned direct upload with signed checksum](docs/adr/0002-presigned-direct-upload-with-signed-checksum.md)
+- **Architecture decisions:** [ADR-0001 evidence vault with RLS backstop](docs/adr/0001-evidence-vault-with-rls-backstop.md), [ADR-0002 presigned direct upload with signed checksum](docs/adr/0002-presigned-direct-upload-with-signed-checksum.md), [ADR-0003 server-rendered UI in the API binary](docs/adr/0003-server-rendered-ui-in-the-api-binary.md)
 
 ```
                  completed upload               approve (all requirements met)
@@ -21,6 +21,7 @@ The whole state machine is one table in [`internal/kyc/statemachine.go`](interna
 ## Contents
 
 - [Run it](#run-it)
+- [Use the UI](#use-the-ui)
 - [Walkthrough: create → upload → check → approve](#walkthrough-create--upload--check--approve)
 - [Design](#design)
 - [Deliberate simplifications](#deliberate-simplifications)
@@ -60,6 +61,38 @@ There is no real authentication. `X-User-ID` stands in for a verified identity, 
 | `00000000-0000-0000-0000-000000000003` | system | automated work: checks, System Rejections, notification delivery |
 
 The full matrix is one map in [`internal/policy/policy.go`](internal/policy/policy.go).
+
+## Use the UI
+
+With the service running, open <http://localhost:8080/ui/>. There is nothing to build. Use exactly that address: the vault accepts browser uploads from one origin only, `UI_ORIGIN` in `.env`, so `http://127.0.0.1:8080` can't upload. If you change `HTTP_ADDR` or serve the UI elsewhere, set `UI_ORIGIN` to match and run `make up` again.
+
+Sign in by picking a role. This is a demo identity, not authentication, and **Switch** in the header changes it at any time.
+
+| Role | In the UI |
+|---|---|
+| **Support Agent** | Creates Entities, uploads Documents, follows the next step on each Entity's page. Doesn't see raw provider responses or written reasons |
+| **Compliance Officer** | Works the pending-review queue on **Entities**, runs **Checks**, opens Documents, approves or rejects, and reads the **Audit Trail** |
+
+To walk the whole flow, including a **Resubmission**:
+
+1. As a Support Agent, choose **New Entity** and create an individual named `Ada Lovelace`.
+2. On its page, upload a passport as a PDF, JPEG or PNG. The Entity moves to pending review.
+3. **Switch** to Compliance Officer. The Entity is in the queue on **Entities**. Run each Check from the checklist, then open the Document.
+4. Reject it with a written reason.
+5. **Switch** to Support Agent. The page says to contact Compliance, without showing the reason. Upload a new Document, which starts a new **Review Cycle**.
+6. **Switch** to Compliance Officer. Earlier Checks no longer count, so run them again, then approve. The Audit Trail at the bottom of the page shows both cycles.
+
+The mock **Screening Provider** reacts to words in the legal name, in any case:
+
+| Legal name contains | What happens |
+|---|---|
+| `SANCTIONED` | Sanctions screening is a **Hard Fail**, so a **System Rejection** follows |
+| `BADADDRESS` | Address verification (businesses) is a **Hard Fail** |
+| `PEP` | PEP screening (individuals) is a **Manual Review Result**, which blocks approval. Re-running gives the same answer, so reject it |
+| `PROVIDERDOWN` | Every Check is a **Provider Error**: nothing is recorded, and the Check stays missing |
+| `TIMEOUT` | The same, after waiting for `PROVIDER_TIMEOUT` |
+
+The page doesn't update by itself. Use **Refresh**, or act and let it reload. To see abandoned uploads expire without waiting 15 minutes, set `UPLOAD_URL_TTL` to something short in `.env`.
 
 ## Walkthrough: create → upload → check → approve
 
@@ -225,7 +258,7 @@ Notifications contain identifiers and the transition only, never document conten
 - **Screening is synchronous.** The officer's request waits for the provider, which is bounded by `PROVIDER_TIMEOUT`. Real vendors are often asynchronous, with callbacks or polling.
 - **No periodic re-KYC or ongoing monitoring.** `verified` is terminal. Real programmes re-screen on a schedule and on list updates, and can move a verified customer back into review.
 - **No read model for support.** The **Redacted View** is computed per request from the same tables.
-- **Identity is a header.** `X-User-ID` stands in for a verified identity from an identity provider.
+- **Identity is a header or a cookie.** `X-User-ID`, and the UI's unsigned "sign in as" cookie, stand in for a verified identity from an identity provider.
 - **The screening provider is a mock** driven by magic names, as vendor sandboxes are.
 
 ## What production would do differently
@@ -248,6 +281,7 @@ internal/kyc          domain types, state machine, approval rules (no I/O)
 internal/policy       who may do what, and which fields each role sees
 internal/app          use cases: one actor-scoped transaction each
 internal/httpapi      HTTP transport: routing, middleware, JSON mapping
+internal/webui        server-rendered back-office UI under /ui/ (ADR-0003)
 internal/db           connection, actor-scoped transactions, migrations; queries/ → dbgen/ (sqlc)
 internal/vault        Evidence Vault client (presigned upload/download, verification reads)
 internal/screening    Screening Provider interface and the deterministic mock

@@ -15,6 +15,7 @@ const (
 	DeclareDocument Action = "document.declare"
 	CompleteUpload  Action = "document.complete"
 	ReadHistory     Action = "entity.history"
+	ReadAuditTrail  Action = "entity.audit_trail"
 	RunCheck        Action = "check.run"
 	Review          Action = "entity.review"
 	ReadChecklist   Action = "entity.checklist"
@@ -31,6 +32,9 @@ var grants = map[Action]map[kyc.Role]bool{
 	CompleteUpload:  {kyc.RoleComplianceOfficer: true, kyc.RoleSupportAgent: true},
 	// The audit trail is for compliance only.
 	ReadHistory: {kyc.RoleComplianceOfficer: true},
+	// So is the merged trail, which adds Evidence Accesses. Their log is readable
+	// only by officers (RLS), so automation doesn't get the trail either.
+	ReadAuditTrail: {kyc.RoleComplianceOfficer: true},
 	// Screening is for compliance and automation; support agents only onboard.
 	RunCheck: {kyc.RoleComplianceOfficer: true, kyc.RoleSystem: true},
 	// Decisions are made by people with compliance authority, never by automation.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bfischetti/kyc-lifecycle/internal/db"
 	"github.com/bfischetti/kyc-lifecycle/internal/db/dbgen"
@@ -131,6 +132,7 @@ func (s *Service) CreateEntity(ctx context.Context, actor kyc.Actor, in kyc.NewE
 			Type:      dbgen.EntityType(in.Type),
 			LegalName: in.LegalName,
 			Country:   in.Country,
+			CreatedBy: pgtype.UUID{Bytes: actor.UserID, Valid: true},
 		})
 		if err != nil {
 			return fmt.Errorf("insert entity: %w", err)

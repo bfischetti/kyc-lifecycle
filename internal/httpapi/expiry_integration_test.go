@@ -130,7 +130,7 @@ func TestUploadIntentExpiry(t *testing.T) {
 
 		agent := kyc.Actor{UserID: uuid.MustParse(supportAgent), Role: kyc.RoleSupportAgent}
 		err := e.store(t).InTx(t.Context(), agent, func(q *dbgen.Queries) error {
-			_, err := q.MarkDocumentUploaded(t.Context(), uuid.MustParse(docID))
+			_, err := q.MarkDocumentUploaded(t.Context(), dbgen.MarkDocumentUploadedParams{ID: uuid.MustParse(docID)})
 			return err
 		})
 		if !db.IsNoRows(err) {

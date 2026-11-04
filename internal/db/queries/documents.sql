@@ -1,6 +1,6 @@
 -- name: CreateDocument :one
-INSERT INTO documents (entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO documents (entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_expires_at, declared_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: GetDocument :one
@@ -13,7 +13,7 @@ SELECT * FROM documents WHERE id = $1 AND entity_id = $2 FOR UPDATE;
 -- Matches nothing once the upload permission has lapsed: an Upload Intent
 -- completes only within its window, even if the bytes arrived in time.
 UPDATE documents
-SET upload_status = 'uploaded', uploaded_at = now()
+SET upload_status = 'uploaded', uploaded_at = now(), completed_by = $2
 WHERE id = $1 AND upload_status = 'awaiting_upload' AND upload_expires_at > now()
 RETURNING *;
 

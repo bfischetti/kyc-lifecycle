@@ -7,9 +7,45 @@ package dbgen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+const listEvidenceAccessForEntity = `-- name: ListEvidenceAccessForEntity :many
+SELECT a.accessed_by, a.accessed_at, d.doc_type
+FROM evidence_access a
+JOIN documents d ON d.id = a.document_id
+WHERE a.entity_id = $1
+ORDER BY a.accessed_at, a.id
+`
+
+type ListEvidenceAccessForEntityRow struct {
+	AccessedBy uuid.UUID
+	AccessedAt time.Time
+	DocType    DocumentType
+}
+
+// Row-level security lets only compliance officers see these rows.
+func (q *Queries) ListEvidenceAccessForEntity(ctx context.Context, entityID uuid.UUID) ([]ListEvidenceAccessForEntityRow, error) {
+	rows, err := q.db.Query(ctx, listEvidenceAccessForEntity, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEvidenceAccessForEntityRow
+	for rows.Next() {
+		var i ListEvidenceAccessForEntityRow
+		if err := rows.Scan(&i.AccessedBy, &i.AccessedAt, &i.DocType); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
 const recordEvidenceAccess = `-- name: RecordEvidenceAccess :exec
 INSERT INTO evidence_access (document_id, entity_id, accessed_by)

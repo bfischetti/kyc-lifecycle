@@ -61,6 +61,38 @@ func (q *Queries) InsertCheckPayload(ctx context.Context, arg InsertCheckPayload
 	return err
 }
 
+const listChecksForEntity = `-- name: ListChecksForEntity :many
+SELECT id, entity_id, check_type, provider, result, run_by, created_at FROM checks WHERE entity_id = $1 ORDER BY created_at, id
+`
+
+func (q *Queries) ListChecksForEntity(ctx context.Context, entityID uuid.UUID) ([]Check, error) {
+	rows, err := q.db.Query(ctx, listChecksForEntity, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Check
+	for rows.Next() {
+		var i Check
+		if err := rows.Scan(
+			&i.ID,
+			&i.EntityID,
+			&i.CheckType,
+			&i.Provider,
+			&i.Result,
+			&i.RunBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChecksSince = `-- name: ListChecksSince :many
 SELECT id, entity_id, check_type, provider, result, run_by, created_at FROM checks
 WHERE entity_id = $1 AND created_at >= $2

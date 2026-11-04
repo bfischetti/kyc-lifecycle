@@ -533,6 +533,8 @@ type Document struct {
 	UploadedAt      *time.Time
 	ReviewStatus    DocumentReviewStatus
 	CreatedAt       time.Time
+	DeclaredBy      pgtype.UUID
+	CompletedBy     pgtype.UUID
 }
 
 type Entity struct {
@@ -544,6 +546,7 @@ type Entity struct {
 	Version   int32
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	CreatedBy pgtype.UUID
 }
 
 type EvidenceAccess struct {

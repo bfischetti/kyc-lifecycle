@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createDocument = `-- name: CreateDocument :one
-INSERT INTO documents (entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at
+INSERT INTO documents (entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_expires_at, declared_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at, declared_by, completed_by
 `
 
 type CreateDocumentParams struct {
@@ -27,6 +28,7 @@ type CreateDocumentParams struct {
 	Sha256          string
 	VaultKey        string
 	UploadExpiresAt time.Time
+	DeclaredBy      pgtype.UUID
 }
 
 func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error) {
@@ -39,6 +41,7 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 		arg.Sha256,
 		arg.VaultKey,
 		arg.UploadExpiresAt,
+		arg.DeclaredBy,
 	)
 	var i Document
 	err := row.Scan(
@@ -55,6 +58,8 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 		&i.UploadedAt,
 		&i.ReviewStatus,
 		&i.CreatedAt,
+		&i.DeclaredBy,
+		&i.CompletedBy,
 	)
 	return i, err
 }
@@ -75,7 +80,7 @@ func (q *Queries) ExpireLapsedUploads(ctx context.Context) (int64, error) {
 }
 
 const getDocument = `-- name: GetDocument :one
-SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at FROM documents WHERE id = $1 AND entity_id = $2
+SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at, declared_by, completed_by FROM documents WHERE id = $1 AND entity_id = $2
 `
 
 type GetDocumentParams struct {
@@ -100,12 +105,14 @@ func (q *Queries) GetDocument(ctx context.Context, arg GetDocumentParams) (Docum
 		&i.UploadedAt,
 		&i.ReviewStatus,
 		&i.CreatedAt,
+		&i.DeclaredBy,
+		&i.CompletedBy,
 	)
 	return i, err
 }
 
 const getDocumentForUpdate = `-- name: GetDocumentForUpdate :one
-SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at FROM documents WHERE id = $1 AND entity_id = $2 FOR UPDATE
+SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at, declared_by, completed_by FROM documents WHERE id = $1 AND entity_id = $2 FOR UPDATE
 `
 
 type GetDocumentForUpdateParams struct {
@@ -130,12 +137,14 @@ func (q *Queries) GetDocumentForUpdate(ctx context.Context, arg GetDocumentForUp
 		&i.UploadedAt,
 		&i.ReviewStatus,
 		&i.CreatedAt,
+		&i.DeclaredBy,
+		&i.CompletedBy,
 	)
 	return i, err
 }
 
 const listCompletedDocumentsSince = `-- name: ListCompletedDocumentsSince :many
-SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at FROM documents
+SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at, declared_by, completed_by FROM documents
 WHERE entity_id = $1 AND upload_status = 'uploaded' AND uploaded_at >= $2
 ORDER BY uploaded_at, id
 `
@@ -168,6 +177,8 @@ func (q *Queries) ListCompletedDocumentsSince(ctx context.Context, arg ListCompl
 			&i.UploadedAt,
 			&i.ReviewStatus,
 			&i.CreatedAt,
+			&i.DeclaredBy,
+			&i.CompletedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -180,7 +191,7 @@ func (q *Queries) ListCompletedDocumentsSince(ctx context.Context, arg ListCompl
 }
 
 const listDocumentsForEntity = `-- name: ListDocumentsForEntity :many
-SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at FROM documents WHERE entity_id = $1 ORDER BY created_at, id
+SELECT id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at, declared_by, completed_by FROM documents WHERE entity_id = $1 ORDER BY created_at, id
 `
 
 func (q *Queries) ListDocumentsForEntity(ctx context.Context, entityID uuid.UUID) ([]Document, error) {
@@ -206,6 +217,8 @@ func (q *Queries) ListDocumentsForEntity(ctx context.Context, entityID uuid.UUID
 			&i.UploadedAt,
 			&i.ReviewStatus,
 			&i.CreatedAt,
+			&i.DeclaredBy,
+			&i.CompletedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -219,15 +232,20 @@ func (q *Queries) ListDocumentsForEntity(ctx context.Context, entityID uuid.UUID
 
 const markDocumentUploaded = `-- name: MarkDocumentUploaded :one
 UPDATE documents
-SET upload_status = 'uploaded', uploaded_at = now()
+SET upload_status = 'uploaded', uploaded_at = now(), completed_by = $2
 WHERE id = $1 AND upload_status = 'awaiting_upload' AND upload_expires_at > now()
-RETURNING id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at
+RETURNING id, entity_id, doc_type, expiry_date, content_type, size_bytes, sha256, vault_key, upload_status, upload_expires_at, uploaded_at, review_status, created_at, declared_by, completed_by
 `
+
+type MarkDocumentUploadedParams struct {
+	ID          uuid.UUID
+	CompletedBy pgtype.UUID
+}
 
 // Matches nothing once the upload permission has lapsed: an Upload Intent
 // completes only within its window, even if the bytes arrived in time.
-func (q *Queries) MarkDocumentUploaded(ctx context.Context, id uuid.UUID) (Document, error) {
-	row := q.db.QueryRow(ctx, markDocumentUploaded, id)
+func (q *Queries) MarkDocumentUploaded(ctx context.Context, arg MarkDocumentUploadedParams) (Document, error) {
+	row := q.db.QueryRow(ctx, markDocumentUploaded, arg.ID, arg.CompletedBy)
 	var i Document
 	err := row.Scan(
 		&i.ID,
@@ -243,6 +261,8 @@ func (q *Queries) MarkDocumentUploaded(ctx context.Context, id uuid.UUID) (Docum
 		&i.UploadedAt,
 		&i.ReviewStatus,
 		&i.CreatedAt,
+		&i.DeclaredBy,
+		&i.CompletedBy,
 	)
 	return i, err
 }

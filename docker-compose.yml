@@ -29,7 +29,9 @@ services:
     volumes:
       - vaultdata:/data
 
-  # One-shot: creates the private bucket if it does not exist yet.
+  # One-shot: creates the private bucket if it does not exist yet, then sets its
+  # CORS rule. The rule is set on every run, so an existing volume gets it too
+  # and a changed UI_ORIGIN takes effect (ADR-0003).
   vault-init:
     image: amazon/aws-cli:latest
     depends_on:
@@ -39,12 +41,17 @@ services:
       AWS_SECRET_ACCESS_KEY: ${VAULT_SECRET_KEY:?set in .env}
       AWS_DEFAULT_REGION: us-east-1
       BUCKET: ${VAULT_BUCKET:-evidence}
+      UI_ORIGIN: ${UI_ORIGIN:-http://localhost:8080}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        cors='{"CORSRules":[{"AllowedOrigins":["'"$$UI_ORIGIN"'"],"AllowedMethods":["PUT"],"AllowedHeaders":["content-type","x-amz-checksum-sha256"]}]}'
         for i in $$(seq 1 30); do
-          aws --endpoint-url http://vault:9000 s3api head-bucket --bucket "$$BUCKET" 2>/dev/null && echo "bucket $$BUCKET exists" && exit 0
-          aws --endpoint-url http://vault:9000 s3api create-bucket --bucket "$$BUCKET" && echo "bucket $$BUCKET created" && exit 0
+          if aws --endpoint-url http://vault:9000 s3api head-bucket --bucket "$$BUCKET" 2>/dev/null \
+            || aws --endpoint-url http://vault:9000 s3api create-bucket --bucket "$$BUCKET"; then
+            aws --endpoint-url http://vault:9000 s3api put-bucket-cors --bucket "$$BUCKET" --cors-configuration "$$cors" \
+              && echo "bucket $$BUCKET ready; uploads allowed from $$UI_ORIGIN" && exit 0
+          fi
           sleep 1
         done
         echo "vault not reachable" >&2; exit 1

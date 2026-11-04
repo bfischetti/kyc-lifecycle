@@ -118,6 +118,21 @@ func TestSink(t *testing.T) {
 		}
 	})
 
+	t.Run("a notification queued before reason was removed is accepted and the reason isn't logged", func(t *testing.T) {
+		const secretReason = "possible link to a sanctioned party"
+		queued := strings.Replace(body, `"to":"verified"`, `"to":"rejected","reason":"`+secretReason+`"`, 1)
+		s, logs := newTestSink(now)
+		if got := deliver(s, "msg_1", now, queued, queued, testSecret); got != http.StatusNoContent {
+			t.Fatalf("status = %d, want 204", got)
+		}
+		if strings.Contains(logs.String(), secretReason) {
+			t.Errorf("the reason appears in the sink's log: %s", logs.String())
+		}
+		if lines := logs.lines(t); lines[0]["to"] != "rejected" {
+			t.Errorf("logged notification = %v", lines[0])
+		}
+	})
+
 	t.Run("an oversized body is refused", func(t *testing.T) {
 		s, _ := newTestSink(now)
 		big := strings.Repeat("x", maxBody+1)

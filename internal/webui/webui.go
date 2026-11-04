@@ -1,0 +1,399 @@
+// Package webui is the server-rendered back-office UI (ADR-0003). Its handlers
+// call app.Service directly, so policy and row-level security apply exactly as
+// they do for the JSON API. It contains no business rules.
+package webui
+
+import (
+	"bytes"
+	"context"
+	"embed"
+	"errors"
+	"html/template"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/bfischetti/kyc-lifecycle/internal/app"
+	"github.com/bfischetti/kyc-lifecycle/internal/kyc"
+	"github.com/bfischetti/kyc-lifecycle/internal/observability"
+)
+
+const (
+	cookieName = "kyc_ui_user"
+	maxForm    = 1 << 16
+)
+
+// The people a browser may sign in as, by their seeded user ids. The System
+// user is deliberately absent: it isn't a person.
+var signInUsers = map[kyc.Role]uuid.UUID{
+	kyc.RoleSupportAgent:      uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+	kyc.RoleComplianceOfficer: uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+}
+
+// Printable ASCII, matching what the JSON API accepts as an Idempotency-Key.
+var validIdempotencyKey = regexp.MustCompile(`^[\x21-\x7E]{1,255}$`)
+
+//go:embed templates/*.html
+var templateFS embed.FS
+
+//go:embed static
+var staticFS embed.FS
+
+var funcs = template.FuncMap{
+	"roleName":   roleName,
+	"statusName": statusName,
+	"typeName":   typeName,
+	"timestamp":  func(t time.Time) string { return t.UTC().Format("2 Jan 2006, 15:04 UTC") },
+}
+
+// Parsing here means a broken template stops the service at startup rather
+// than on the first visit to that page.
+var pages = func() map[string]*template.Template {
+	out := map[string]*template.Template{}
+	for _, name := range []string{"sign_in", "new_entity", "entity", "message"} {
+		out[name] = template.Must(template.New("layout").Funcs(funcs).ParseFS(templateFS, "templates/layout.html", "templates/"+name+".html"))
+	}
+	return out
+}()
+
+// Handler serves the UI under /ui/.
+func Handler(svc *app.Service, log *slog.Logger) http.Handler {
+	u := &ui{svc: svc, log: log}
+	static, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		panic(err) // the embedded directory is fixed at build time
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /ui/static/", http.StripPrefix("/ui/static/", http.FileServerFS(static)))
+	mux.HandleFunc("GET /ui/sign-in", u.signInPage)
+	mux.HandleFunc("POST /ui/sign-in", u.signIn)
+	mux.Handle("GET /ui/{$}", u.authed(func(w http.ResponseWriter, r *http.Request, _ kyc.Actor) {
+		http.Redirect(w, r, "/ui/entities/new", http.StatusSeeOther)
+	}))
+	mux.Handle("GET /ui/entities/new", u.authed(u.newEntity))
+	mux.Handle("POST /ui/entities", u.authed(u.createEntity))
+	mux.Handle("GET /ui/entities/{id}", u.authed(u.entity))
+	mux.Handle("/ui/", u.authed(func(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
+		u.notFound(w, r, &a)
+	}))
+
+	// SameSite=Strict doesn't cover signing in, which needs no cookie, so
+	// cross-origin form posts are refused here too.
+	return http.NewCrossOriginProtection().Handler(mux)
+}
+
+type ui struct {
+	svc *app.Service
+	log *slog.Logger
+}
+
+// view is what every page's layout receives.
+type view struct {
+	Title string
+	Actor *kyc.Actor
+	Data  any
+}
+
+func (u *ui) render(w http.ResponseWriter, r *http.Request, status int, page string, v view) {
+	// Rendered to a buffer first, so a template failure can't send half a page.
+	var buf bytes.Buffer
+	if err := pages[page].ExecuteTemplate(&buf, "layout", v); err != nil {
+		u.log.ErrorContext(r.Context(), "render page", slog.String("page", page), slog.String("error", err.Error()))
+		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write(buf.Bytes())
+}
+
+func (u *ui) message(w http.ResponseWriter, r *http.Request, status int, a *kyc.Actor, title, text string) {
+	u.render(w, r, status, "message", view{Title: title, Actor: a, Data: text})
+}
+
+func (u *ui) notFound(w http.ResponseWriter, r *http.Request, a *kyc.Actor) {
+	u.message(w, r, http.StatusNotFound, a, "Not found", "There is nothing at this address. Check the link and try again.")
+}
+
+func (u *ui) internal(w http.ResponseWriter, r *http.Request, a *kyc.Actor, err error) {
+	u.log.ErrorContext(r.Context(), "internal error", slog.String("error", err.Error()))
+	u.message(w, r, http.StatusInternalServerError, a, "Something went wrong", "The request couldn't be completed. Try again.")
+}
+
+// actorFromCookie resolves the identity cookie to a person. The cookie is no
+// stronger than the API's X-User-ID header (ADR-0003), and the role always
+// comes from the database.
+func (u *ui) actorFromCookie(r *http.Request) (kyc.Actor, bool, error) {
+	c, err := r.Cookie(cookieName)
+	if err != nil {
+		return kyc.Actor{}, false, nil
+	}
+	id, err := uuid.Parse(c.Value)
+	if err != nil {
+		return kyc.Actor{}, false, nil
+	}
+	actor, err := u.svc.Authenticate(r.Context(), id)
+	if errors.Is(err, app.ErrUnauthenticated) {
+		return kyc.Actor{}, false, nil
+	}
+	if err != nil {
+		return kyc.Actor{}, false, err
+	}
+	if signInUsers[actor.Role] != actor.UserID {
+		return kyc.Actor{}, false, nil
+	}
+	return actor, true, nil
+}
+
+// authed sends anyone without a valid identity to sign-in.
+func (u *ui) authed(next func(http.ResponseWriter, *http.Request, kyc.Actor)) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		actor, ok, err := u.actorFromCookie(r)
+		if err != nil {
+			u.internal(w, r, nil, err)
+			return
+		}
+		if !ok {
+			setIdentity(w, "", -1)
+			http.Redirect(w, r, "/ui/sign-in", http.StatusSeeOther)
+			return
+		}
+		observability.Annotate(r.Context(), slog.String("user_id", actor.UserID.String()))
+		next(w, r, actor)
+	})
+}
+
+func setIdentity(w http.ResponseWriter, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name: cookieName, Value: value, Path: "/ui/", MaxAge: maxAge,
+		HttpOnly: true, SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func (u *ui) signInPage(w http.ResponseWriter, r *http.Request) {
+	var current *kyc.Actor
+	actor, ok, err := u.actorFromCookie(r)
+	if err != nil {
+		u.internal(w, r, nil, err)
+		return
+	}
+	if ok {
+		current = &actor
+	}
+	u.render(w, r, http.StatusOK, "sign_in", view{Title: "Sign in", Actor: current})
+}
+
+func (u *ui) signIn(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxForm)
+	id, ok := signInUsers[kyc.Role(r.PostFormValue("role"))]
+	if !ok {
+		http.Redirect(w, r, "/ui/sign-in", http.StatusSeeOther)
+		return
+	}
+	setIdentity(w, id.String(), 0)
+	http.Redirect(w, r, "/ui/", http.StatusSeeOther)
+}
+
+type entityForm struct {
+	IdempotencyKey string
+	Type           string
+	LegalName      string
+	Country        string
+	Errors         map[string]string
+}
+
+func (u *ui) newEntity(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
+	u.render(w, r, http.StatusOK, "new_entity", view{Title: "New Entity", Actor: &a, Data: entityForm{IdempotencyKey: uuid.NewString()}})
+}
+
+func (u *ui) createEntity(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxForm)
+	if err := r.ParseForm(); err != nil {
+		u.message(w, r, http.StatusBadRequest, &a, "Couldn't read the form", "Go back and try again.")
+		return
+	}
+	form := entityForm{
+		IdempotencyKey: uuid.NewString(),
+		Type:           r.PostFormValue("type"),
+		LegalName:      r.PostFormValue("legal_name"),
+		Country:        strings.ToUpper(strings.TrimSpace(r.PostFormValue("country"))),
+	}
+	in := kyc.NewEntity{Type: kyc.EntityType(form.Type), LegalName: form.LegalName, Country: form.Country}
+
+	// Invalid input never claims the key, so correcting the form can't
+	// collide with the attempt that was refused.
+	if err := in.Validate(); err != nil {
+		ve, ok := kyc.AsValidationError(err)
+		if !ok {
+			u.internal(w, r, &a, err)
+			return
+		}
+		form.Errors = make(map[string]string, len(ve.Fields))
+		for _, f := range ve.Fields {
+			form.Errors[f.Field] = f.Message
+		}
+		u.render(w, r, http.StatusUnprocessableEntity, "new_entity", view{Title: "New Entity", Actor: &a, Data: form})
+		return
+	}
+
+	id, err := u.createOnce(r.Context(), a, r.PostFormValue("idempotency_key"), in)
+	if err != nil {
+		u.internal(w, r, &a, err)
+		return
+	}
+	observability.Annotate(r.Context(), slog.String("entity_id", id))
+	http.Redirect(w, r, "/ui/entities/"+id, http.StatusSeeOther)
+}
+
+// createOnce makes a double-submitted form create a single Entity: every
+// submission with the same key gets the first one's id.
+func (u *ui) createOnce(ctx context.Context, a kyc.Actor, key string, in kyc.NewEntity) (string, error) {
+	if !validIdempotencyKey.MatchString(key) {
+		key = uuid.NewString()
+	}
+	fingerprint := []byte("ui create entity\n" + string(in.Type) + "\n" + in.LegalName + "\n" + in.Country)
+	stored, err := u.svc.BeginIdempotent(ctx, a, key, fingerprint)
+	if errors.Is(err, app.ErrIdempotencyKeyReused) {
+		// Back, edit, submit again: the same form key, but a different Entity.
+		key = uuid.NewString()
+		stored, err = u.svc.BeginIdempotent(ctx, a, key, fingerprint)
+	}
+	if err != nil {
+		return "", err
+	}
+	if stored != nil {
+		return string(stored.Body), nil
+	}
+	e, err := u.svc.CreateEntity(ctx, a, in)
+	if err != nil {
+		// A 5xx frees the key for a retry.
+		_ = u.svc.FinishIdempotent(context.WithoutCancel(ctx), a, key, http.StatusInternalServerError, nil)
+		return "", err
+	}
+	id := e.ID.String()
+	// The Entity exists, so this request still succeeds if storing fails.
+	if err := u.svc.FinishIdempotent(context.WithoutCancel(ctx), a, key, http.StatusSeeOther, []byte(id)); err != nil {
+		u.log.ErrorContext(ctx, "store idempotent response", slog.String("error", err.Error()))
+	}
+	return id, nil
+}
+
+type entityPage struct {
+	Entity     kyc.Entity
+	NextTitle  string
+	NextDetail string
+}
+
+func (u *ui) entity(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		u.notFound(w, r, &a)
+		return
+	}
+	observability.Annotate(r.Context(), slog.String("entity_id", id.String()))
+	v, err := u.svc.GetEntity(r.Context(), a, id)
+	switch {
+	case errors.Is(err, app.ErrNotFound):
+		u.notFound(w, r, &a)
+		return
+	case err != nil:
+		u.internal(w, r, &a, err)
+		return
+	}
+	title, detail := nextStep(a.Role, v.Entity)
+	u.render(w, r, http.StatusOK, "entity", view{
+		Title: v.Entity.LegalName, Actor: &a,
+		Data: entityPage{Entity: v.Entity, NextTitle: title, NextDetail: detail},
+	})
+}
+
+// nextStep says, in the glossary's words, what happens next for this role.
+func nextStep(role kyc.Role, e kyc.Entity) (title, detail string) {
+	required := requiredDocuments(e.Type)
+	if role == kyc.RoleComplianceOfficer {
+		switch e.Status {
+		case kyc.StatusUnverified:
+			return "Waiting for a Document", "This Entity has nothing to review until a Support Agent attaches " + required + "."
+		case kyc.StatusPendingReview:
+			return "Ready for review", "A Review Cycle is open: run the Required Checks, then decide."
+		case kyc.StatusRejected:
+			return "Rejected", "A new Completed Upload would start a Resubmission and a new Review Cycle."
+		case kyc.StatusVerified:
+			return "Verified", "This Entity is approved. Nothing more can change."
+		}
+	}
+	switch e.Status {
+	case kyc.StatusUnverified:
+		return "Upload a required Document", "This Entity needs " + required + "."
+	case kyc.StatusPendingReview:
+		return "Waiting for Compliance", "Nothing is needed from you right now."
+	case kyc.StatusRejected:
+		return "Rejected: contact Compliance for details", "To resubmit, upload a new Document once you know what to fix."
+	case kyc.StatusVerified:
+		return "Verified", "This Entity is approved. Nothing more is needed."
+	}
+	return string(e.Status), ""
+}
+
+func requiredDocuments(t kyc.EntityType) string {
+	types := kyc.RequiredDocuments(t)
+	names := make([]string, len(types))
+	for i, d := range types {
+		names[i] = documentName(d)
+	}
+	return strings.Join(names, " or ")
+}
+
+func documentName(d kyc.DocumentType) string {
+	switch d {
+	case kyc.DocPassport:
+		return "a passport"
+	case kyc.DocNationalID:
+		return "a national ID"
+	case kyc.DocBusinessRegistration:
+		return "a business registration"
+	case kyc.DocProofOfAddress:
+		return "a proof of address"
+	}
+	return string(d)
+}
+
+func roleName(r kyc.Role) string {
+	switch r {
+	case kyc.RoleComplianceOfficer:
+		return "Compliance Officer"
+	case kyc.RoleSupportAgent:
+		return "Support Agent"
+	}
+	return string(r)
+}
+
+func statusName(s kyc.Status) string {
+	switch s {
+	case kyc.StatusUnverified:
+		return "Unverified"
+	case kyc.StatusPendingReview:
+		return "Pending review"
+	case kyc.StatusVerified:
+		return "Verified"
+	case kyc.StatusRejected:
+		return "Rejected"
+	}
+	return string(s)
+}
+
+func typeName(t kyc.EntityType) string {
+	switch t {
+	case kyc.EntityTypeIndividual:
+		return "Individual"
+	case kyc.EntityTypeBusiness:
+		return "Business"
+	}
+	return string(t)
+}

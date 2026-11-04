@@ -9,6 +9,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"log/slog"
@@ -96,6 +97,7 @@ func Handler(svc *app.Service, log *slog.Logger) http.Handler {
 	mux.Handle("POST /ui/entities", u.authed(u.createEntity))
 	mux.Handle("GET /ui/entities/{id}", u.authed(u.entity))
 	mux.Handle("POST /ui/entities/{id}/checks", u.authed(u.runCheck))
+	mux.Handle("POST /ui/entities/{id}/decision", u.authed(u.decide))
 	mux.Handle("POST /ui/entities/{id}/documents", u.authed(u.declareDocument))
 	mux.Handle("POST /ui/entities/{id}/documents/{docID}/complete", u.authed(u.completeUpload))
 	mux.Handle("/ui/", u.authed(func(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
@@ -405,8 +407,9 @@ type entityPage struct {
 	ShowRaw bool
 	// CanRun is whether the checklist offers running Checks.
 	CanRun bool
-	// Notice reports why the last action didn't happen.
-	Notice string
+	// Decision is the officer's panel, nil when there is nothing to decide.
+	Decision *decisionPanel
+	entityPageState
 	// CanUpload is whether this page offers uploading. The form is the Support
 	// Agent's: officers review what agents attach.
 	CanUpload bool
@@ -416,6 +419,56 @@ type entityPage struct {
 	MaxBytes    int64
 }
 
+// entityPageState is what the last refused action leaves on the page.
+type entityPageState struct {
+	// Notice says why the action didn't happen.
+	Notice string
+	// Reason is the officer's typed reason, kept through a refusal.
+	Reason      string
+	ReasonError string
+}
+
+// decisionPanel states what each decision would do, in the Review Cycle's terms:
+// Documents aren't decided one by one.
+type decisionPanel struct {
+	Version     int
+	Blockers    []string
+	PendingDocs string
+}
+
+func newDecisionPanel(e kyc.Entity, docs []kyc.Document, cl *app.Checklist) *decisionPanel {
+	var pending []string
+	for _, d := range docs {
+		if d.UploadStatus == kyc.UploadComplete && d.ReviewStatus == kyc.ReviewPending {
+			pending = append(pending, docTypeName(d.Type))
+		}
+	}
+	p := &decisionPanel{Version: e.Version, PendingDocs: pendingDocuments(pending)}
+	if cl != nil {
+		for _, item := range cl.Items {
+			if item.Problem == "" {
+				continue
+			}
+			name := documentsName(item.Documents)
+			if item.Check != "" {
+				name = checkTypeName(item.Check)
+			}
+			p.Blockers = append(p.Blockers, name+": "+problemName(item))
+		}
+	}
+	return p
+}
+
+func pendingDocuments(names []string) string {
+	switch len(names) {
+	case 0:
+		return "no pending Documents"
+	case 1:
+		return "its 1 pending Document: " + names[0]
+	}
+	return "its " + strconv.Itoa(len(names)) + " pending Documents: " + strings.Join(names, ", ")
+}
+
 func (u *ui) entity(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
@@ -423,10 +476,10 @@ func (u *ui) entity(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
 		return
 	}
 	observability.Annotate(r.Context(), slog.String("entity_id", id.String()))
-	u.renderEntity(w, r, a, id, http.StatusOK, "")
+	u.renderEntity(w, r, a, id, http.StatusOK, entityPageState{})
 }
 
-func (u *ui) renderEntity(w http.ResponseWriter, r *http.Request, a kyc.Actor, id uuid.UUID, status int, notice string) {
+func (u *ui) renderEntity(w http.ResponseWriter, r *http.Request, a kyc.Actor, id uuid.UUID, status int, state entityPageState) {
 	v, err := u.svc.GetEntity(r.Context(), a, id)
 	switch {
 	case errors.Is(err, app.ErrNotFound):
@@ -451,11 +504,15 @@ func (u *ui) renderEntity(w http.ResponseWriter, r *http.Request, a kyc.Actor, i
 			title, detail = "System Rejection", "A Hard Fail rejected this Entity automatically. A new Completed Upload would start a Resubmission and a new Review Cycle."
 		}
 	}
+	var panel *decisionPanel
+	if policy.Allowed(a.Role, policy.Review) && v.Entity.Status == kyc.StatusPendingReview {
+		panel = newDecisionPanel(v.Entity, v.Documents, checklist)
+	}
 	u.render(w, r, status, "entity", view{
 		Title: v.Entity.LegalName, Actor: &a,
 		Data: entityPage{
 			Entity: v.Entity, NextTitle: title, NextDetail: detail, Documents: v.Documents, Checks: v.Checks,
-			Checklist: checklist, Notice: notice,
+			Checklist: checklist, Decision: panel, entityPageState: state,
 			ShowRaw:     policy.CanSee(a.Role, policy.CheckRawResponse),
 			CanRun:      policy.Allowed(a.Role, policy.RunCheck) && v.Entity.Status == kyc.StatusPendingReview,
 			CanUpload:   a.Role == kyc.RoleSupportAgent && v.Entity.Status != kyc.StatusVerified,
@@ -504,11 +561,65 @@ func (u *ui) runCheck(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
 	case errors.Is(err, app.ErrForbidden):
 		u.message(w, r, http.StatusForbidden, &a, "Not allowed", "Only a Compliance Officer can run Checks.")
 	case errors.Is(err, app.ErrProviderUnavailable):
-		u.renderEntity(w, r, a, id, http.StatusBadGateway, checkTypeName(checkType)+": the Screening Provider didn't answer. Nothing was recorded, so this Check still stands as it did. Try again.")
+		u.renderEntity(w, r, a, id, http.StatusBadGateway, entityPageState{Notice: checkTypeName(checkType) + ": the Screening Provider didn't answer. Nothing was recorded, so this Check still stands as it did. Try again."})
 	case errors.Is(err, app.ErrConflict):
-		u.renderEntity(w, r, a, id, http.StatusConflict, "Checks run only while an Entity is pending review, and this one no longer is. Nothing was recorded.")
+		u.renderEntity(w, r, a, id, http.StatusConflict, entityPageState{Notice: "Checks run only while an Entity is pending review, and this one no longer is. Nothing was recorded."})
 	case invalid:
-		u.renderEntity(w, r, a, id, http.StatusBadRequest, "That Check Type doesn't exist. Nothing was recorded.")
+		u.renderEntity(w, r, a, id, http.StatusBadRequest, entityPageState{Notice: "That Check Type doesn't exist. Nothing was recorded."})
+	default:
+		u.internal(w, r, &a, err)
+	}
+}
+
+func (u *ui) decide(w http.ResponseWriter, r *http.Request, a kyc.Actor) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		u.notFound(w, r, &a)
+		return
+	}
+	observability.Annotate(r.Context(), slog.String("entity_id", id.String()))
+	r.Body = http.MaxBytesReader(w, r.Body, maxForm)
+	if err := r.ParseForm(); err != nil {
+		u.message(w, r, http.StatusBadRequest, &a, "Couldn't read the form", "Go back and try again.")
+		return
+	}
+	state := entityPageState{Reason: r.PostFormValue("reason")}
+	req := app.ReviewRequest{Decision: app.Decision(r.PostFormValue("decision")), Reason: state.Reason}
+	if v, err := strconv.Atoi(r.PostFormValue("expected_version")); err == nil {
+		req.ExpectedVersion = &v
+	}
+
+	_, err = u.svc.Review(r.Context(), a, id, req)
+	var (
+		stale   *app.StaleDecisionError
+		blocked *app.UnmetRequirementsError
+	)
+	ve, invalid := kyc.AsValidationError(err)
+	switch {
+	case err == nil:
+		http.Redirect(w, r, "/ui/entities/"+id.String(), http.StatusSeeOther)
+	case errors.Is(err, app.ErrNotFound):
+		u.notFound(w, r, &a)
+	case errors.Is(err, app.ErrForbidden):
+		u.message(w, r, http.StatusForbidden, &a, "Not allowed", "Only a Compliance Officer can make a decision.")
+	case invalid:
+		for _, f := range ve.Fields {
+			if f.Field == "reason" {
+				state.ReasonError = fmt.Sprintf("Write at least %d characters.", app.MinReasonLength)
+			} else {
+				state.Notice = "The decision couldn't be read, so nothing was recorded. Refresh the page and try again."
+			}
+		}
+		u.renderEntity(w, r, a, id, http.StatusUnprocessableEntity, state)
+	case errors.As(err, &stale):
+		state.Notice = fmt.Sprintf("This Entity changed while you were looking at it, so your decision wasn't recorded. It is now %s at Version %d. Check its current state before deciding.", statusName(stale.CurrentStatus), stale.CurrentVersion)
+		u.renderEntity(w, r, a, id, http.StatusConflict, state)
+	case errors.As(err, &blocked):
+		state.Notice = "Approval was refused because the requirements below aren't met. Nothing was recorded."
+		u.renderEntity(w, r, a, id, http.StatusConflict, state)
+	case errors.Is(err, app.ErrConflict):
+		state.Notice = "Only an Entity pending review can be decided, so nothing was recorded."
+		u.renderEntity(w, r, a, id, http.StatusConflict, state)
 	default:
 		u.internal(w, r, &a, err)
 	}

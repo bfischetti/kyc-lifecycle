@@ -28,6 +28,7 @@ The whole state machine is one table in [`internal/kyc/statemachine.go`](interna
 - [What production would do differently](#what-production-would-do-differently)
 - [Project layout](#project-layout)
 - [Development](#development)
+- [License](#license)
 
 ## Run it
 
@@ -39,8 +40,6 @@ make up                # Postgres, the Evidence Vault (RustFS) and the webhook-s
 make migrate           # apply migrations as the owner role
 make serve             # the API on :8080, plus the outbox worker and upload-expiry sweeper
 ```
-
-If ports 5432, 9000 or 8090 are taken, change `POSTGRES_PORT`, `VAULT_PORT` or `WEBHOOK_SINK_PORT` in `.env`. Also update the URLs that use them (`DATABASE_URL`, `MIGRATE_DATABASE_URL`, `VAULT_ENDPOINT`, `WEBHOOK_URL`).
 
 In a second terminal, watch the notifications arrive:
 
@@ -302,3 +301,7 @@ make sqlc               # regenerate query code after editing migrations/ or int
 ```
 
 Integration tests start throwaway containers with testcontainers, so they need nothing from `make up`. CI runs lint, the sqlc drift check, both test suites and the sink image build on every PR.
+
+## License
+
+[MIT](LICENSE)
